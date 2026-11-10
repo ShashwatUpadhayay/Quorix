@@ -38,8 +38,10 @@ export default function RegisterPage() {
         throw new Error(data.error || "Failed to create account.");
       }
 
-      // Redirect to home or onboarding
-      router.push("/");
+      // Redirect to role-specific workspace (SRS §1.3 & §8.1)
+      const userRole = data.user?.role;
+      const destination = userRole === "expert" ? "/expert" : "/candidate";
+      router.push(destination);
       router.refresh();
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "An unexpected error occurred.");

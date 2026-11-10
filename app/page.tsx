@@ -217,6 +217,12 @@ export default function LandingPage() {
                     {authUser.role}
                   </span>
                 </div>
+                <Link
+                  href={authUser.role === "expert" ? "/expert" : "/candidate"}
+                  className="inline-flex items-center text-xs font-medium bg-[#1A1918] text-[#FAF8F5] px-3 py-1.5 hover:bg-[#2C2A28] transition-colors focus-visible:outline-2 focus-visible:outline-[#1A1918]"
+                >
+                  Workspace
+                </Link>
                 <button
                   onClick={handleLogout}
                   className="inline-flex items-center text-xs text-[#6E6B65] hover:text-[#1A1918] transition-colors focus-visible:outline-2 focus-visible:outline-[#1A1918]"
@@ -269,17 +275,26 @@ export default function LandingPage() {
 
             {/* Primary Action Buttons */}
             <div className="flex flex-wrap items-center justify-center sm:justify-start gap-4 pt-2">
+              {authUser ? (
+                <Link
+                  href={authUser.role === "expert" ? "/expert" : "/candidate"}
+                  className="inline-flex items-center justify-center text-sm font-medium bg-[#1A1918] text-[#FAF8F5] px-6 py-3 hover:bg-[#2C2A28] active:scale-[0.98] transition-all focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#1A1918]"
+                >
+                  Enter {authUser.role === "expert" ? "Expert Workspace" : "Candidate Workspace"}
+                </Link>
+              ) : (
+                <Link
+                  href="/register"
+                  className="inline-flex items-center justify-center text-sm font-medium bg-[#1A1918] text-[#FAF8F5] px-6 py-3 hover:bg-[#2C2A28] active:scale-[0.98] transition-all focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#1A1918]"
+                >
+                  Get Started (Register)
+                </Link>
+              )}
               <a
                 href="#problems"
-                className="inline-flex items-center justify-center text-sm font-medium bg-[#1A1918] text-[#FAF8F5] px-6 py-3 hover:bg-[#2C2A28] active:scale-[0.98] transition-all focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#1A1918]"
-              >
-                Read Problem &amp; Architecture Analysis
-              </a>
-              <a
-                href="#requirements"
                 className="inline-flex items-center justify-center text-sm font-medium bg-[#FFFFFF] text-[#1A1918] border border-[#D5D1C7] px-6 py-3 hover:bg-[#F2EFE9] active:scale-[0.98] transition-all focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#1A1918]"
               >
-                View Functional Modules
+                Read Problem &amp; Architecture
               </a>
             </div>
 
@@ -634,7 +649,7 @@ export default function LandingPage() {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               {functionalModules.map((mod) => (
                 <div
-
+    
                   className="border border-[#E5E2DA] bg-[#FFFFFF] p-6 space-y-3 shadow-xs"
                 >
 
