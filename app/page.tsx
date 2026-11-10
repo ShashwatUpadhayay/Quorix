@@ -1,14 +1,48 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
+import Link from "next/link";
 import {
   ShieldCheck,
   CheckCircle2,
   AlertTriangle,
+  User,
+  LogOut,
 } from "lucide-react";
 
 export default function LandingPage() {
   const [selectedProblemIndex, setSelectedProblemIndex] = useState<number>(0);
+  const [authUser, setAuthUser] = useState<{
+    id?: string;
+    name: string;
+    email: string;
+    role: string;
+  } | null>(null);
+
+  useEffect(() => {
+    fetch("/api/auth/me")
+      .then((res) => {
+        if (res.ok) return res.json();
+        return null;
+      })
+      .then((data) => {
+        if (data?.authenticated && data?.user) {
+          setAuthUser(data.user);
+        }
+      })
+      .catch(() => {
+        // Unauthenticated or network issue
+      });
+  }, []);
+
+  const handleLogout = async () => {
+    try {
+      await fetch("/api/auth/logout", { method: "POST" });
+      setAuthUser(null);
+    } catch {
+      // Ignored
+    }
+  };
 
   const problemsAndSolutions = [
     {
@@ -174,12 +208,39 @@ export default function LandingPage() {
           </nav>
 
           <div className="flex items-center space-x-3">
-            <a
-              href="#lifecycle"
-              className="inline-flex items-center justify-center text-xs font-medium bg-[#1A1918] text-[#FAF8F5] px-4 py-2 border border-transparent hover:bg-[#2C2A28] active:scale-[0.98] transition-all focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#1A1918]"
-            >
-              Explore Platform
-            </a>
+            {authUser ? (
+              <div className="flex items-center space-x-3">
+                <div className="flex items-center space-x-1.5 text-xs text-[#1A1918]">
+                  <User className="w-3.5 h-3.5 text-[#6E6B65]" />
+                  <span className="font-medium">{authUser.name}</span>
+                  <span className="text-[10px] font-mono border border-[#E5E2DA] bg-[#FFFFFF] px-1.5 py-0.5 text-[#6E6B65] uppercase">
+                    {authUser.role}
+                  </span>
+                </div>
+                <button
+                  onClick={handleLogout}
+                  className="inline-flex items-center text-xs text-[#6E6B65] hover:text-[#1A1918] transition-colors focus-visible:outline-2 focus-visible:outline-[#1A1918]"
+                  title="Sign out"
+                >
+                  <LogOut className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            ) : (
+              <>
+                <Link
+                  href="/login"
+                  className="text-xs font-medium text-[#6E6B65] hover:text-[#1A1918] transition-colors px-2 py-1.5 focus-visible:outline-2 focus-visible:outline-[#1A1918]"
+                >
+                  Sign In
+                </Link>
+                <Link
+                  href="/register"
+                  className="inline-flex items-center justify-center text-xs font-medium bg-[#1A1918] text-[#FAF8F5] px-3.5 py-1.5 border border-transparent hover:bg-[#2C2A28] active:scale-[0.98] transition-all focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#1A1918]"
+                >
+                  Get Started
+                </Link>
+              </>
+            )}
           </div>
         </div>
       </header>
@@ -190,6 +251,7 @@ export default function LandingPage() {
         <section className="border-b border-[#E5E2DA] pt-20 pb-20 px-6">
           <div className="max-w-4xl mx-auto space-y-8 text-center sm:text-left">
             {/* Context meta label */}
+          
           
 
             {/* Primary Headline */}
@@ -572,7 +634,7 @@ export default function LandingPage() {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               {functionalModules.map((mod) => (
                 <div
-         
+
                   className="border border-[#E5E2DA] bg-[#FFFFFF] p-6 space-y-3 shadow-xs"
                 >
 
