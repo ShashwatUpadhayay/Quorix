@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getDatabase, UserDoc } from "@/lib/mongodb";
 import { verifyPassword, signAuthToken, AUTH_COOKIE_NAME, TOKEN_EXPIRY_DAYS } from "@/lib/auth";
+import { recordUserActivity } from "@/lib/activity";
 
 export async function POST(req: NextRequest) {
   try {
@@ -45,6 +46,13 @@ export async function POST(req: NextRequest) {
     }
 
     const userId = user._id ? user._id.toString() : "";
+
+    await recordUserActivity({
+      userId,
+      action: "Signed In",
+      category: "auth",
+      detail: `Authenticated session started for ${user.role} portal`,
+    });
 
     // Sign JWT Token
     const token = await signAuthToken({

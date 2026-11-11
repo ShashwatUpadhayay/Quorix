@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getDatabase, UserDoc } from "@/lib/mongodb";
 import { hashPassword, signAuthToken, AUTH_COOKIE_NAME, TOKEN_EXPIRY_DAYS } from "@/lib/auth";
+import { recordUserActivity } from "@/lib/activity";
 
 export async function POST(req: NextRequest) {
   try {
@@ -65,6 +66,13 @@ export async function POST(req: NextRequest) {
 
     const insertResult = await usersCollection.insertOne(newUserDoc);
     const userId = insertResult.insertedId.toString();
+
+    await recordUserActivity({
+      userId,
+      action: "Account Registered",
+      category: "auth",
+      detail: `Created ${newUserDoc.role} workspace account`,
+    });
 
     // Sign JWT Token
     const token = await signAuthToken({

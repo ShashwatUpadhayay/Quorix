@@ -80,3 +80,85 @@ export interface UserDoc {
   createdAt: Date;
   updatedAt: Date;
 }
+
+export interface SkillItem {
+  id: string;
+  name: string;
+  level: "Core" | "Intermediate" | "Foundational";
+}
+
+export interface ExperienceItem {
+  id: string;
+  role: string;
+  organization: string;
+  period: string;
+  summary: string;
+}
+
+export interface EducationItem {
+  id: string;
+  degree: string;
+  institution: string;
+  year: string;
+  grade?: string;
+}
+
+export interface PublicationItem {
+  id: string;
+  title: string;
+  venue: string;
+  year: string;
+  url?: string;
+}
+
+export interface AwardItem {
+  id: string;
+  title: string;
+  issuer: string;
+  year: string;
+  description?: string;
+}
+
+export interface CertificationItem {
+  id: string;
+  name: string;
+  issuer: string;
+  year: string;
+}
+
+/**
+ * Unified Profile Document Schema covering SRS §7.1 CandidateProfile & ExpertProfile
+ */
+export interface ProfileDoc {
+  _id?: string;
+  userId: string;
+  headline: string;
+  location: string;
+  phone: string;
+  bio: string;
+  links: {
+    github: string;
+    linkedin: string;
+    website: string;
+  };
+  skills: SkillItem[];
+  experience: ExperienceItem[];
+  education: EducationItem[];
+  publications: PublicationItem[];
+  awards: AwardItem[];
+  certifications: CertificationItem[];
+  updatedAt: Date;
+}
+
+/**
+ * Activity & Audit Log Document Schema (SRS §7.1 AuditLog)
+ */
+export interface ActivityLogDoc {
+  _id?: string;
+  userId: string;
+  action: string;
+  category: "interview" | "board" | "profile" | "auth";
+  detail: string;
+  dateKey: string; // YYYY-MM-DD in UTC/local for fast heatmap grouping
+  timestamp: Date;
+}

@@ -649,7 +649,7 @@ export default function LandingPage() {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               {functionalModules.map((mod) => (
                 <div
-    
+                  key={mod.module}
                   className="border border-[#E5E2DA] bg-[#FFFFFF] p-6 space-y-3 shadow-xs"
                 >
 
