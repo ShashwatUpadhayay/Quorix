@@ -38,7 +38,7 @@ export default function RegisterPage() {
         throw new Error(data.error || "Failed to create account.");
       }
 
-      // Redirect to role-specific workspace (SRS §1.3 & §8.1)
+      // Redirect to role-specific workspace
       const userRole = data.user?.role;
       const destination = userRole === "expert" ? "/expert" : "/candidate";
       router.push(destination);
@@ -66,7 +66,7 @@ export default function RegisterPage() {
         <div className="border border-[#D5D1C7] bg-[#FFFFFF] p-8 shadow-xs space-y-6">
           <div className="space-y-1">
             <div className="text-xs font-mono text-[#6E6B65] uppercase">
-              Registration (SRS §3.1)
+              Registration
             </div>
             <h1 className="text-2xl font-bold tracking-tight text-[#1A1918]">
               Create your account

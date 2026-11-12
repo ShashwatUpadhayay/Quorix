@@ -56,7 +56,7 @@ export default function LandingPage() {
       solutionSummary:
         "Automated resume parsing with candidate-verified domain tagging and topic-mapped question bank filtering.",
       solutionDetails:
-        "Quorix extracts technical proficiencies, frameworks, and architecture experience from uploaded CVs (FR-C04). Candidates verify and correct these tags prior to the interview (FR-C05). The platform then queries a controlled, peer-reviewed question repository strictly indexed against those verified competencies (FR-Q03).",
+        "Quorix extracts technical proficiencies, frameworks, and architecture experience from uploaded CVs. Candidates verify and correct these tags prior to the interview. The platform then queries a controlled, peer-reviewed question repository strictly indexed against those verified competencies.",
     },
     {
       id: "02",
@@ -69,7 +69,7 @@ export default function LandingPage() {
       solutionSummary:
         "A structured three-stage adaptive flow with real-time topic coverage tracking.",
       solutionDetails:
-        "Every session follows a pedagogical progression: Ice-breaker → Deep Technical → Techno-Managerial (FR-M03). Each question is tagged by domain, and Quorix continuously benchmarks covered vs. unprobed topics (FR-R03), alerting board interviewers or the AI engine when key areas are being neglected.",
+        "Every session follows a pedagogical progression: Ice-breaker → Deep Technical → Techno-Managerial. Each question is tagged by domain, and Quorix continuously benchmarks covered vs. unprobed topics, alerting board interviewers or the AI engine when key areas are being neglected.",
     },
     {
       id: "03",
@@ -82,7 +82,7 @@ export default function LandingPage() {
       solutionSummary:
         "Standardized tri-factor rubric scoring across Relevance, Depth, and Clarity with verifiable explanations.",
       solutionDetails:
-        "Quorix isolates three orthogonal evaluation dimensions on a 1-10 point scale. Every score is accompanied by line-by-line justification citing specific technical statements from the candidate. Human interviewers retain full authority to review, contextualize, or override AI scores (SRS §4.1 & §9.4).",
+        "Quorix isolates three orthogonal evaluation dimensions on a 1-10 point scale. Every score is accompanied by line-by-line justification citing specific technical statements from the candidate. Human interviewers retain full authority to review, contextualize, or override AI scores.",
     },
     {
       id: "04",
@@ -95,7 +95,7 @@ export default function LandingPage() {
       solutionSummary:
         "A dual-mode platform supporting autonomous AI practice and live multi-expert boardrooms with AI co-pilot.",
       solutionDetails:
-        "Quorix provides a unified ecosystem: candidates practice in adaptive solo simulations (FR-M01), while organizations conduct live board sessions (FR-L01). For live panels, Quorix matches experts by domain relevance (FR-E03), suggests real-time follow-ups from the question bank (FR-L04), and records timestamped event logs (FR-L06).",
+        "Quorix provides a unified ecosystem: candidates practice in adaptive solo simulations, while organizations conduct live board sessions. For live panels, Quorix matches experts by domain relevance, suggests real-time follow-ups from the question bank, and records timestamped event logs.",
     },
   ];
 
@@ -203,7 +203,7 @@ export default function LandingPage() {
               href="#requirements"
               className="hover:text-[#1A1918] transition-colors focus-visible:outline-2 focus-visible:outline-[#1A1918]"
             >
-              SRS Modules
+              Capabilities
             </a>
           </nav>
 
@@ -493,7 +493,7 @@ export default function LandingPage() {
                 <p className="text-xs text-[#55524C] leading-relaxed">
                   Focuses on deep technical domain competencies. The AI engine
                   dynamically scales question difficulty based on recent answer
-                  quality signals (FR-M04).
+                  quality signals.
                 </p>
                 <div className="pt-2 text-[11px] font-mono text-[#6E6B65] border-t border-[#E5E2DA]">
                   Goal: Probe architectural depth and implementation mastery.
@@ -521,7 +521,7 @@ export default function LandingPage() {
           </div>
         </section>
 
-        {/* EVALUATION RUBRIC SECTION — Tri-Factor AI Scoring (SRS §4.1) */}
+        {/* EVALUATION RUBRIC SECTION — Tri-Factor AI Scoring */}
         <section id="rubric" className="border-b border-[#E5E2DA] py-20 px-6">
           <div className="max-w-6xl mx-auto space-y-12">
             <div className="space-y-3">
@@ -634,7 +634,7 @@ export default function LandingPage() {
           </div>
         </section>
 
-        {/* FUNCTIONAL REQUIREMENTS CHECKLIST (SRS V1.0) */}
+        {/* PLATFORM CAPABILITIES CHECKLIST */}
         <section id="requirements" className="border-b border-[#E5E2DA] bg-[#F7F5F0] py-20 px-6">
           <div className="max-w-6xl mx-auto space-y-12">
             <div className="space-y-3">
@@ -678,7 +678,7 @@ export default function LandingPage() {
           </div>
         </section>
 
-        {/* SECURITY & DATA PROTECTION CONTROLS (SRS §9) */}
+        {/* SECURITY & DATA PROTECTION CONTROLS */}
         <section className="py-16 px-6">
           <div className="max-w-6xl mx-auto">
             <div className="border border-[#E5E2DA] bg-[#FFFFFF] p-8 space-y-6 shadow-xs">

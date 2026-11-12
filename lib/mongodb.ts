@@ -67,7 +67,7 @@ export async function getDatabase(customDbName?: string): Promise<Db> {
 }
 
 /**
- * Core User Document Schema (SRS §7.1 & §9.1)
+ * Core User Document Schema
  */
 export interface UserDoc {
   _id?: string;
@@ -126,8 +126,24 @@ export interface CertificationItem {
   year: string;
 }
 
+export type DifficultyTier =
+  | "Foundational"
+  | "Intermediate"
+  | "Senior"
+  | "Staff";
+
+export interface InterviewConfig {
+  experienceYears: number;
+  difficultyTier: DifficultyTier;
+  difficultyNumeric: number; // 1 to 4
+  primaryTopics: string[];
+  focusAreas: string[];
+  recommendedTrack: string;
+  lastParsedAt?: Date;
+}
+
 /**
- * Unified Profile Document Schema covering SRS §7.1 CandidateProfile & ExpertProfile
+ * Unified Profile Document Schema for Candidate & Expert workspaces
  */
 export interface ProfileDoc {
   _id?: string;
@@ -147,11 +163,13 @@ export interface ProfileDoc {
   publications: PublicationItem[];
   awards: AwardItem[];
   certifications: CertificationItem[];
+  interviewConfig?: InterviewConfig;
+  rawResumeText?: string;
   updatedAt: Date;
 }
 
 /**
- * Activity & Audit Log Document Schema (SRS §7.1 AuditLog)
+ * Activity & Audit Log Document Schema
  */
 export interface ActivityLogDoc {
   _id?: string;
