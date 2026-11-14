@@ -180,3 +180,68 @@ export interface ActivityLogDoc {
   dateKey: string; // YYYY-MM-DD in UTC/local for fast heatmap grouping
   timestamp: Date;
 }
+
+export type InterviewType =
+  | "coding"
+  | "technical"
+  | "system_design"
+  | "behavioral";
+
+export interface MockSessionQuestion {
+  id: string;
+  order: number;
+  stage: "warmup" | "core" | "deep_dive" | "scenario";
+  prompt: string;
+  rubricHint: string;
+  codeStarter?: string;
+  constraints?: string[];
+  examples?: Array<{ input: string; output: string; explanation?: string }>;
+  expectedSignals?: string[];
+}
+
+export interface MockSessionResponse {
+  questionId: string;
+  questionPrompt: string;
+  stage: string;
+  userAnswer: string;
+  codeSubmitted?: string;
+  language?: string;
+  scores: {
+    relevance: number;
+    depth: number;
+    clarity: number;
+    overall: number;
+  };
+  feedback: string;
+  submittedAt: Date;
+}
+
+/**
+ * Mock Interview Session Document Schema
+ */
+export interface MockSessionDoc {
+  _id?: string;
+  userId: string;
+  candidateName: string;
+  title: string;
+  interviewType: InterviewType;
+  level: DifficultyTier;
+  difficultyNumeric: number;
+  focus: string; // framework, language or topic (e.g. "React", "Go", "Distributed Systems")
+  durationMinutes: number;
+  status: "in_progress" | "completed" | "abandoned";
+  questions: MockSessionQuestion[];
+  responses: MockSessionResponse[];
+  currentQuestionIndex: number;
+  overallScore?: number;
+  categoryScores?: {
+    relevance: number;
+    depth: number;
+    clarity: number;
+  };
+  summaryFeedback?: string;
+  startedAt: Date;
+  completedAt?: Date;
+  createdAt: Date;
+  updatedAt: Date;
+}

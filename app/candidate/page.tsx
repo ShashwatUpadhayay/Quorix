@@ -6,7 +6,6 @@ import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Play,
-  Pause,
   FileText,
   Calendar,
   BarChart3,
@@ -14,23 +13,28 @@ import {
   LogOut,
   Plus,
   X,
-  Send,
-  ArrowUpRight,
-  CheckCircle2,
+  Code2,
+  Terminal,
+  Cpu,
+  Users,
   Clock,
-  SlidersHorizontal,
-  Layers,
+  ArrowRight,
   ShieldCheck,
-  Download,
+  Eye,
+  CheckCircle2,
+  AlertCircle,
 } from "lucide-react";
 import UserProfileView from "@/components/UserProfileView";
 import ResumeParserPanel from "@/components/ResumeParserPanel";
-import type { DifficultyTier, InterviewConfig, SkillItem } from "@/lib/mongodb";
-import {
-  computeTopicCoverage,
-  evaluateAdaptiveAnswer,
-  generateAdaptiveMockQuestions,
-} from "@/lib/adaptiveEngine";
+import type {
+  DifficultyTier,
+  InterviewConfig,
+  InterviewType,
+  MockSessionDoc,
+  MockSessionResponse,
+  SkillItem,
+} from "@/lib/mongodb";
+import { computeTopicCoverage } from "@/lib/adaptiveEngine";
 
 interface UserProfile {
   id?: string;
@@ -48,57 +52,72 @@ const DEFAULT_INTERVIEW_CONFIG: InterviewConfig = {
   recommendedTrack: "Intermediate Backend & APIs Track",
 };
 
-const TIER_NUMERIC_MAP: Record<DifficultyTier, number> = {
-  Foundational: 1,
-  Intermediate: 2,
-  Senior: 3,
-  Staff: 4,
-};
-
 const DIFFICULTY_TIERS: Array<{
   value: DifficultyTier;
   tier: string;
   desc: string;
 }> = [
-  { value: "Foundational", tier: "Tier 1", desc: "Core concepts & syntax" },
-  { value: "Intermediate", tier: "Tier 2", desc: "Production trade-offs" },
-  { value: "Senior", tier: "Tier 3", desc: "Scale & failure modes" },
-  { value: "Staff", tier: "Tier 4", desc: "Org-wide architecture" },
+  { value: "Foundational", tier: "Tier 1", desc: "Core syntax & basic concepts" },
+  { value: "Intermediate", tier: "Tier 2", desc: "Production trade-offs & scale" },
+  { value: "Senior", tier: "Tier 3", desc: "Complex systems & failure modes" },
+  { value: "Staff", tier: "Tier 4", desc: "Architecture & org-wide strategy" },
 ];
 
-const INTERVIEW_STAGES: Array<{
-  id: "icebreaker" | "technical" | "managerial";
-  step: string;
-  label: string;
-  subtitle: string;
+const INTERVIEW_TYPES: Array<{
+  id: InterviewType;
+  title: string;
+  desc: string;
+  icon: React.ComponentType<{ className?: string }>;
 }> = [
   {
-    id: "icebreaker",
-    step: "01",
-    label: "Ice-Breaker",
-    subtitle: "Context & motivation",
+    id: "coding",
+    title: "Coding & Algorithms",
+    desc: "Data structures, algorithmic problem solving & live code editor",
+    icon: Code2,
   },
   {
     id: "technical",
-    step: "02",
-    label: "Core Technical",
-    subtitle: "Architecture & depth",
+    title: "Technical Systems",
+    desc: "Framework internals, memory, concurrency & runtime mechanics",
+    icon: Terminal,
   },
   {
-    id: "managerial",
-    step: "03",
-    label: "Techno-Managerial",
-    subtitle: "Trade-offs & leadership",
+    id: "system_design",
+    title: "System Design",
+    desc: "Distributed scalability, storage, caching & high availability",
+    icon: Cpu,
+  },
+  {
+    id: "behavioral",
+    title: "Behavioral & Leadership",
+    desc: "STAR methodology, high-stakes incidents & trade-off decisions",
+    icon: Users,
   },
 ];
 
-const FALLBACK_TOPICS = [
+const POPULAR_FRAMEWORKS_AND_LANGUAGES = [
+  "React",
+  "Next.js",
+  "Node.js",
+  "TypeScript",
+  "Go",
+  "Python",
+  "Java",
+  "Rust",
+  "PostgreSQL",
+  "Kubernetes",
+  "Docker",
+  "AWS",
+  "GraphQL",
+  "FastAPI",
   "Distributed Systems",
-  "Backend & APIs",
-  "Databases & Storage",
-  "Frontend & UI",
-  "Cloud & DevOps",
-  "AI & ML Systems",
+];
+
+const DURATION_OPTIONS = [
+  { minutes: 15, label: "15 Mins", questions: "2 Questions", desc: "Quick sprint" },
+  { minutes: 30, label: "30 Mins", questions: "3 Questions", desc: "Standard practice" },
+  { minutes: 45, label: "45 Mins", questions: "4 Questions", desc: "In-depth loop" },
+  { minutes: 60, label: "60 Mins", questions: "5 Questions", desc: "Full mock board" },
 ];
 
 const EASE_CURVE: [number, number, number, number] = [0.16, 1, 0.3, 1];
@@ -108,52 +127,36 @@ export default function CandidateWorkspace() {
   const [user, setUser] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
 
-  // Active feature in sidebar (shows 1 feature at a time)
+  // Active module in sidebar
   const [activeFeature, setActiveFeature] = useState<
     "mock" | "resume" | "boards" | "reports" | "profile"
   >("mock");
 
-  // Profile-backed Skills & Adaptive Interview Calibration
+  // Profile-backed Skills & Interview Calibration
   const [profileSkills, setProfileSkills] = useState<SkillItem[]>([]);
   const [interviewConfig, setInterviewConfig] = useState<InterviewConfig>(
     DEFAULT_INTERVIEW_CONFIG
   );
   const [newSkillInput, setNewSkillInput] = useState("");
 
-  // State: Adaptive Mock Interview
-  const [mockConfig, setMockConfig] = useState<{
-    topic: string;
-    difficulty: DifficultyTier;
-  }>({
-    topic: DEFAULT_INTERVIEW_CONFIG.primaryTopics[0],
-    difficulty: DEFAULT_INTERVIEW_CONFIG.difficultyTier,
-  });
-  const [mockActive, setMockActive] = useState(false);
-  const [mockStage, setMockStage] = useState<
-    "icebreaker" | "technical" | "managerial"
-  >("icebreaker");
-  const [currentAnswer, setCurrentAnswer] = useState("");
-  const [isEvaluating, setIsEvaluating] = useState(false);
-  const [practicedTopics, setPracticedTopics] = useState<string[]>([]);
-  const [evaluatedResponses, setEvaluatedResponses] = useState<
-    Array<{
-      question: string;
-      answer: string;
-      stage: string;
-      topic: string;
-      scores: {
-        relevance: number;
-        depth: number;
-        clarity: number;
-        overall: number;
-      };
-      feedback: string;
-    }>
-  >([]);
+  // New Mock Interview Setup State
+  const [selectedInterviewType, setSelectedInterviewType] =
+    useState<InterviewType>("technical");
+  const [selectedLevel, setSelectedLevel] =
+    useState<DifficultyTier>("Intermediate");
+  const [selectedFocus, setSelectedFocus] = useState<string>("Backend & APIs");
+  const [customFocusInput, setCustomFocusInput] = useState("");
+  const [selectedDuration, setSelectedDuration] = useState<number>(30);
+  const [isLaunchingSession, setIsLaunchingSession] = useState(false);
+  const [launchError, setLaunchError] = useState<string | null>(null);
 
-  // Inline feedback banners (replacing jarring browser alerts)
+  // Historical Mock Interview Sessions
+  const [mockSessions, setMockSessions] = useState<MockSessionDoc[]>([]);
+  const [selectedTranscriptSession, setSelectedTranscriptSession] =
+    useState<MockSessionDoc | null>(null);
+
+  // Inline feedback banners
   const [boardNotice, setBoardNotice] = useState<string | null>(null);
-  const [exportNotice, setExportNotice] = useState<string | null>(null);
 
   const hydrateFromProfile = useCallback(async () => {
     try {
@@ -167,16 +170,29 @@ export default function CandidateWorkspace() {
         data.profile?.interviewConfig || DEFAULT_INTERVIEW_CONFIG;
       setProfileSkills(loadedSkills);
       setInterviewConfig(loadedConfig);
-      setMockConfig({
-        topic: loadedConfig.primaryTopics[0] || "Backend & APIs",
-        difficulty: loadedConfig.difficultyTier || "Intermediate",
-      });
+      setSelectedLevel(loadedConfig.difficultyTier || "Intermediate");
+      if (loadedConfig.primaryTopics?.[0]) {
+        setSelectedFocus(loadedConfig.primaryTopics[0]);
+      }
     } catch {
       // Ignored
     }
   }, []);
 
-  // Authentication check + initial profile hydration on mount
+  const fetchPastSessions = useCallback(async () => {
+    try {
+      const res = await fetch("/api/mock/session", { cache: "no-store" });
+      if (!res.ok) return;
+      const data = await res.json();
+      if (Array.isArray(data.sessions)) {
+        setMockSessions(data.sessions);
+      }
+    } catch {
+      // Ignored
+    }
+  }, []);
+
+  // Authentication check + initial hydration
   useEffect(() => {
     fetch("/api/auth/me")
       .then((res) => {
@@ -189,6 +205,7 @@ export default function CandidateWorkspace() {
         } else {
           setUser(data.user);
           hydrateFromProfile();
+          fetchPastSessions();
         }
       })
       .catch(() => {
@@ -197,53 +214,41 @@ export default function CandidateWorkspace() {
       .finally(() => {
         setLoading(false);
       });
-  }, [router, hydrateFromProfile]);
+  }, [router, hydrateFromProfile, fetchPastSessions]);
 
-  const effectiveMockConfig = useMemo<InterviewConfig>(() => {
-    const restTopics = interviewConfig.primaryTopics.filter(
-      (t) => t !== mockConfig.topic
+  const availableFocusTags = useMemo(() => {
+    const fromProfile = profileSkills.map((s) => s.name);
+    return Array.from(
+      new Set([
+        ...interviewConfig.primaryTopics,
+        ...fromProfile,
+        ...POPULAR_FRAMEWORKS_AND_LANGUAGES,
+      ])
     );
-    return {
-      ...interviewConfig,
-      difficultyTier: mockConfig.difficulty,
-      difficultyNumeric: TIER_NUMERIC_MAP[mockConfig.difficulty] || 2,
-      primaryTopics: [mockConfig.topic, ...restTopics],
-    };
-  }, [interviewConfig, mockConfig]);
+  }, [profileSkills, interviewConfig.primaryTopics]);
 
-  const availableTopics = useMemo(
-    () =>
-      Array.from(
-        new Set([...interviewConfig.primaryTopics, ...FALLBACK_TOPICS])
-      ),
-    [interviewConfig.primaryTopics]
-  );
-
-  const adaptiveQuestions = useMemo(
-    () => generateAdaptiveMockQuestions(effectiveMockConfig, profileSkills),
-    [effectiveMockConfig, profileSkills]
-  );
-
-  const activeMockQuestion = useMemo(() => {
-    return (
-      adaptiveQuestions.find((q) => q.stage === mockStage) ||
-      adaptiveQuestions[0]
-    );
-  }, [adaptiveQuestions, mockStage]);
+  const practicedTopics = useMemo(() => {
+    return mockSessions.flatMap((s) => [s.focus, ...(s.questions?.map((q) => q.stage) || [])]);
+  }, [mockSessions]);
 
   const topicCoverage = useMemo(
     () => computeTopicCoverage(interviewConfig, profileSkills, practicedTopics),
     [interviewConfig, profileSkills, practicedTopics]
   );
 
-  const sessionAverage = useMemo(() => {
-    if (evaluatedResponses.length === 0) return null;
-    const sum = evaluatedResponses.reduce(
-      (acc, item) => acc + item.scores.overall,
+  const completedSessions = useMemo(
+    () => mockSessions.filter((s) => s.status === "completed"),
+    [mockSessions]
+  );
+
+  const averageScore = useMemo(() => {
+    if (completedSessions.length === 0) return null;
+    const sum = completedSessions.reduce(
+      (acc, s) => acc + (s.overallScore || 0),
       0
     );
-    return (sum / evaluatedResponses.length).toFixed(1);
-  }, [evaluatedResponses]);
+    return (sum / completedSessions.length).toFixed(1);
+  }, [completedSessions]);
 
   const handleLogout = async () => {
     try {
@@ -265,6 +270,40 @@ export default function CandidateWorkspace() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ action, category, detail }),
     }).catch(() => {});
+  };
+
+  const handleLaunchMockInterview = async () => {
+    setIsLaunchingSession(true);
+    setLaunchError(null);
+
+    const activeFocus = customFocusInput.trim() || selectedFocus;
+
+    try {
+      const res = await fetch("/api/mock/session", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          interviewType: selectedInterviewType,
+          level: selectedLevel,
+          focus: activeFocus,
+          durationMinutes: selectedDuration,
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || "Failed to initialize interview room.");
+      }
+
+      if (data.roomUrl) {
+        router.push(data.roomUrl);
+      }
+    } catch (err: unknown) {
+      setLaunchError(
+        err instanceof Error ? err.message : "Could not launch interview room."
+      );
+      setIsLaunchingSession(false);
+    }
   };
 
   const syncSkillsToProfile = async (
@@ -319,51 +358,6 @@ export default function CandidateWorkspace() {
     );
   };
 
-  const handleSubmitMockAnswer = () => {
-    if (!currentAnswer.trim() || !activeMockQuestion) return;
-    setIsEvaluating(true);
-    const stageLabel =
-      mockStage === "icebreaker"
-        ? "Ice-Breaker"
-        : mockStage === "technical"
-          ? "Core Technical"
-          : "Techno-Managerial";
-
-    setTimeout(() => {
-      const evaluation = evaluateAdaptiveAnswer(
-        activeMockQuestion,
-        currentAnswer,
-        effectiveMockConfig
-      );
-      const newEval = {
-        question: activeMockQuestion.prompt,
-        answer: currentAnswer,
-        stage: stageLabel,
-        topic: activeMockQuestion.topic,
-        scores: {
-          relevance: evaluation.relevance,
-          depth: evaluation.depth,
-          clarity: evaluation.clarity,
-          overall: evaluation.overall,
-        },
-        feedback: evaluation.feedback,
-      };
-
-      setEvaluatedResponses([newEval, ...evaluatedResponses]);
-      setPracticedTopics((prev) => [...prev, activeMockQuestion.topic]);
-      setCurrentAnswer("");
-      setIsEvaluating(false);
-      logWorkspaceActivity(
-        "Submitted Mock Interview Response",
-        "interview",
-        `${stageLabel} (${activeMockQuestion.topic} • ${effectiveMockConfig.difficultyTier}) — ${evaluation.overall}/10`
-      );
-
-      if (mockStage === "icebreaker") setMockStage("technical");
-      else if (mockStage === "technical") setMockStage("managerial");
-    }, 600);
-  };
-
   if (loading) {
     return (
       <div className="min-h-screen bg-[#FAF8F5] flex items-center justify-center p-6">
@@ -387,7 +381,7 @@ export default function CandidateWorkspace() {
     {
       id: "mock",
       label: "AI Mock Interview",
-      desc: "Solo adaptive practice",
+      desc: "Solo adaptive practice & room",
       icon: Play,
     },
     {
@@ -415,10 +409,6 @@ export default function CandidateWorkspace() {
       icon: User,
     },
   ] as const;
-
-  const activeWordCount = currentAnswer.trim()
-    ? currentAnswer.trim().split(/\s+/).length
-    : 0;
 
   return (
     <div className="min-h-screen bg-[#FAF8F5] text-[#1A1918] flex flex-col md:flex-row font-sans selection:bg-[#E5E2DA]">
@@ -461,7 +451,9 @@ export default function CandidateWorkspace() {
                   key={item.id}
                   onClick={() => {
                     setActiveFeature(item.id);
-                    if (item.id !== "profile") {
+                    if (item.id === "mock") {
+                      fetchPastSessions();
+                    } else if (item.id !== "profile") {
                       hydrateFromProfile();
                     }
                   }}
@@ -536,13 +528,13 @@ export default function CandidateWorkspace() {
       </aside>
 
       {/* ============================================================ */}
-      {/* MAIN CONTENT AREA — SHOWS 1 FEATURE AT A TIME */}
+      {/* MAIN CONTENT AREA */}
       {/* ============================================================ */}
       <main className="flex-1 bg-[#FAF8F5] min-h-screen p-5 sm:p-8 lg:p-12 overflow-y-auto">
         <div className="max-w-5xl mx-auto">
           <AnimatePresence mode="wait">
             {/* ========================================================== */}
-            {/* FEATURE 1: SOLO AI MOCK INTERVIEW */}
+            {/* FEATURE 1: SOLO AI MOCK INTERVIEW & SESSION CONFIG */}
             {/* ========================================================== */}
             {activeFeature === "mock" && (
               <motion.div
@@ -553,30 +545,29 @@ export default function CandidateWorkspace() {
                 transition={{ duration: 0.24, ease: EASE_CURVE }}
                 className="space-y-8"
               >
-                {/* Header + Compact Session Status Bar */}
+                {/* Header + Telemetry Strip */}
                 <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-5 border-b border-[#E5E2DA] pb-6">
                   <div className="space-y-1.5">
                     <div className="inline-flex items-center gap-2 text-xs font-mono text-[#6E6B65]">
                       <span className="w-2 h-2 rounded-xs bg-[#1F7A55]" />
-                      <span>Adaptive AI Practice Studio</span>
+                      <span>Dedicated Real-Time AI Interview Studio</span>
                     </div>
                     <h1 className="text-3xl font-bold tracking-tight text-[#1A1918]">
-                      Solo AI Mock Interview
+                      AI Mock Interview
                     </h1>
                     <p className="text-sm text-[#55524C] leading-relaxed max-w-prose">
-                      Prompts adapt to your resume and domain tags, scoring each response across Relevance, Depth, and Clarity.
+                      Customize your interview format, difficulty level, language or framework, and duration. Each session launches into a private real-time room and records a complete evaluative transcript.
                     </p>
                   </div>
 
-                  {/* Single-Source Session Telemetry Strip */}
                   <div className="flex items-center gap-3 shrink-0">
                     <div className="rounded-lg border border-[#E5E2DA] bg-[#FFFFFF] px-4 py-2.5 flex items-center gap-5 text-xs">
                       <div>
                         <div className="text-[10px] font-mono text-[#8E8B84] uppercase">
-                          Scored
+                          Completed
                         </div>
                         <div className="font-mono font-semibold text-[#1A1918] tabular-nums">
-                          {evaluatedResponses.length}
+                          {completedSessions.length}
                         </div>
                       </div>
                       <div className="h-6 w-px bg-[#E5E2DA]" />
@@ -585,76 +576,61 @@ export default function CandidateWorkspace() {
                           Avg Score
                         </div>
                         <div className="font-mono font-semibold text-[#1F7A55] tabular-nums">
-                          {sessionAverage ? `${sessionAverage}/10` : "—"}
+                          {averageScore ? `${averageScore}/10` : "—"}
                         </div>
                       </div>
                     </div>
-
-                    <button
-                      onClick={() => setMockActive(!mockActive)}
-                      className="group inline-flex items-center gap-2.5 rounded-lg text-xs font-medium bg-[#1A1918] text-[#FAF8F5] pl-4 pr-2.5 py-2.5 hover:bg-[#2C2A28] active:scale-[0.98] transition-all focus-visible:outline-2 focus-visible:outline-[#1A1918]"
-                    >
-                      <span>
-                        {mockActive ? "Pause Session" : "Start Mock Interview"}
-                      </span>
-                      <span className="w-6 h-6 rounded-md bg-[#FAF8F5]/12 flex items-center justify-center transition-transform group-hover:translate-x-0.5">
-                        {mockActive ? (
-                          <Pause className="w-3 h-3" strokeWidth={2} />
-                        ) : (
-                          <Play className="w-3 h-3" strokeWidth={2} />
-                        )}
-                      </span>
-                    </button>
                   </div>
                 </div>
 
-                {/* Double-Bezel Session Configuration Tray */}
-                <div className="rounded-xl border border-[#E5E2DA] bg-[#F2EFE9] p-1.5">
-                  <div className="rounded-lg border border-[#E5E2DA] bg-[#FFFFFF] p-6 space-y-6 shadow-[0_1px_2px_rgba(26,25,24,0.03)]">
-                    {/* Top Row: Calibration summary + Stage Pipeline */}
-                    <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-5 border-b border-[#E5E2DA]">
-                      <div className="flex items-start gap-3">
-                        <div className="w-8 h-8 rounded-md border border-[#E5E2DA] bg-[#FAF8F5] flex items-center justify-center shrink-0 mt-0.5">
-                          <SlidersHorizontal
-                            className="w-4 h-4 text-[#1A1918]"
-                            strokeWidth={1.75}
-                          />
-                        </div>
-                        <div>
-                          <div className="text-sm font-semibold text-[#1A1918]">
-                            Interview Calibration
-                          </div>
-                          <div className="text-xs text-[#6E6B65] mt-0.5">
-                            Focused on{" "}
-                            <span className="text-[#1A1918] font-medium">
-                              {mockConfig.topic}
-                            </span>{" "}
-                            at{" "}
-                            <span className="text-[#1F7A55] font-medium">
-                              {mockConfig.difficulty}
-                            </span>{" "}
-                            depth
-                          </div>
-                        </div>
+                {/* DOUBLE-BEZEL INTERVIEW CONFIGURATION CARD */}
+                <div className="rounded-2xl border border-[#E5E2DA] bg-[#F7F4EE] p-1.5">
+                  <div className="rounded-xl border border-[#E5E2DA] bg-[#FFFFFF] p-6 sm:p-8 space-y-7 shadow-[0_1px_2px_rgba(26,25,24,0.03)]">
+                    {/* SECTION 1: INTERVIEW TYPE */}
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between">
+                        <label className="text-xs font-bold text-[#1A1918] uppercase tracking-wider font-mono">
+                          1. Select Interview Type
+                        </label>
+                        <span className="text-[11px] font-mono text-[#6E6B65]">
+                          Choose your assessment format
+                        </span>
                       </div>
 
-                      {/* 3-Stage Interview Pipeline */}
-                      <div className="flex items-center gap-1.5 bg-[#FAF8F5] border border-[#E5E2DA] rounded-lg p-1">
-                        {INTERVIEW_STAGES.map((stage) => {
-                          const isCurrent = mockStage === stage.id;
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                        {INTERVIEW_TYPES.map((type) => {
+                          const Icon = type.icon;
+                          const isSelected = selectedInterviewType === type.id;
                           return (
                             <button
-                              key={stage.id}
+                              key={type.id}
                               type="button"
-                              onClick={() => setMockStage(stage.id)}
-                              className={`px-2.5 py-1.5 rounded-md text-left transition-all ${
-                                isCurrent
-                                  ? "bg-[#FFFFFF] border border-[#D5D1C7] text-[#1A1918] shadow-[0_1px_2px_rgba(26,25,24,0.04)]"
-                                  : "text-[#6E6B65] border border-transparent hover:text-[#1A1918]"
+                              onClick={() => setSelectedInterviewType(type.id)}
+                              className={`rounded-xl border p-4 text-left transition-all active:scale-[0.98] focus-visible:outline-2 focus-visible:outline-[#1A1918] ${
+                                isSelected
+                                  ? "border-[#1A1918] bg-[#FAF8F5] shadow-[inset_0_0_0_1px_#1A1918]"
+                                  : "border-[#E5E2DA] bg-[#FFFFFF] hover:border-[#D5D1C7] hover:bg-[#FAF8F5]/60"
                               }`}
                             >
-                              <div className="text-[10px] font-mono leading-none">
-                                {stage.step} · {stage.label}
+                              <div className="flex items-center justify-between">
+                                <div
+                                  className={`w-7 h-7 rounded-md flex items-center justify-center ${
+                                    isSelected
+                                      ? "bg-[#1A1918] text-[#FAF8F5]"
+                                      : "bg-[#EFECE4] text-[#423F3A]"
+                                  }`}
+                                >
+                                  <Icon className="w-4 h-4" />
+                                </div>
+                                {isSelected && (
+                                  <span className="w-1.5 h-1.5 rounded-full bg-[#1F7A55]" />
+                                )}
+                              </div>
+                              <div className="text-xs font-bold text-[#1A1918] mt-3">
+                                {type.title}
+                              </div>
+                              <div className="text-[11px] text-[#6E6B65] mt-1 leading-snug">
+                                {type.desc}
                               </div>
                             </button>
                           );
@@ -662,95 +638,142 @@ export default function CandidateWorkspace() {
                       </div>
                     </div>
 
-                    {/* Interactive Topic Selector Chips */}
-                    <div className="space-y-2.5">
+                    {/* SECTION 2: SENIORITY / DIFFICULTY LEVEL */}
+                    <div className="space-y-3 pt-2 border-t border-[#E5E2DA]">
                       <div className="flex items-center justify-between">
-                        <label className="text-xs font-medium text-[#1A1918]">
-                          Interview Domain
+                        <label className="text-xs font-bold text-[#1A1918] uppercase tracking-wider font-mono">
+                          2. Experience Level &amp; Depth
                         </label>
                         <span className="text-[11px] font-mono text-[#6E6B65]">
-                          {interviewConfig.primaryTopics.includes(
-                            mockConfig.topic
-                          )
-                            ? "Matched to your profile"
-                            : "Custom domain"}
+                          Calibrated to resume: {interviewConfig.difficultyTier}
                         </span>
                       </div>
-                      <div className="flex flex-wrap gap-2">
-                        {availableTopics.map((topicOption) => {
-                          const selected = mockConfig.topic === topicOption;
-                          const fromProfile =
-                            interviewConfig.primaryTopics.includes(topicOption);
+
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                        {DIFFICULTY_TIERS.map((tier) => {
+                          const isSelected = selectedLevel === tier.value;
                           return (
                             <button
-                              key={topicOption}
+                              key={tier.value}
                               type="button"
-                              onClick={() =>
-                                setMockConfig({
-                                  ...mockConfig,
-                                  topic: topicOption,
-                                })
-                              }
-                              className={`inline-flex items-center gap-2 rounded-md px-3 py-1.5 text-xs transition-all active:scale-[0.98] focus-visible:outline-2 focus-visible:outline-[#1A1918] ${
-                                selected
+                              onClick={() => setSelectedLevel(tier.value)}
+                              className={`rounded-lg border p-3.5 text-left transition-all active:scale-[0.98] focus-visible:outline-2 focus-visible:outline-[#1A1918] ${
+                                isSelected
+                                  ? "border-[#1A1918] bg-[#FAF8F5] shadow-[inset_0_0_0_1px_#1A1918]"
+                                  : "border-[#E5E2DA] bg-[#FFFFFF] hover:border-[#D5D1C7] hover:bg-[#FAF8F5]/60"
+                              }`}
+                            >
+                              <div className="flex items-center justify-between">
+                                <span className="text-xs font-semibold text-[#1A1918]">
+                                  {tier.value}
+                                </span>
+                                <span className="text-[10px] font-mono text-[#6E6B65]">
+                                  {tier.tier}
+                                </span>
+                              </div>
+                              <div className="text-[11px] text-[#6E6B65] mt-1">
+                                {tier.desc}
+                              </div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    {/* SECTION 3: FRAMEWORK, LANGUAGE OR SPECIALIZED TOPIC */}
+                    <div className="space-y-3 pt-2 border-t border-[#E5E2DA]">
+                      <div className="flex items-center justify-between">
+                        <label className="text-xs font-bold text-[#1A1918] uppercase tracking-wider font-mono">
+                          3. Framework, Language, or Domain Focus
+                        </label>
+                        <span className="text-[11px] font-mono text-[#6E6B65]">
+                          Select or enter custom topic
+                        </span>
+                      </div>
+
+                      {/* Chips */}
+                      <div className="flex flex-wrap gap-2">
+                        {availableFocusTags.slice(0, 14).map((tag) => {
+                          const isSelected =
+                            selectedFocus === tag && !customFocusInput.trim();
+                          const isFromProfile = profileSkills.some(
+                            (s) => s.name.toLowerCase() === tag.toLowerCase()
+                          );
+                          return (
+                            <button
+                              key={tag}
+                              type="button"
+                              onClick={() => {
+                                setSelectedFocus(tag);
+                                setCustomFocusInput("");
+                              }}
+                              className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs transition-all active:scale-[0.98] focus-visible:outline-2 focus-visible:outline-[#1A1918] ${
+                                isSelected
                                   ? "bg-[#1A1918] text-[#FAF8F5] font-medium border border-[#1A1918]"
                                   : "bg-[#FAF8F5] text-[#423F3A] border border-[#E5E2DA] hover:border-[#B5B1A7] hover:text-[#1A1918]"
                               }`}
                             >
-                              <span>{topicOption}</span>
-                              {fromProfile && (
+                              <span>{tag}</span>
+                              {isFromProfile && (
                                 <span
-                                  className={`w-1.5 h-1.5 rounded-xs ${
-                                    selected ? "bg-[#7CC09D]" : "bg-[#1F7A55]"
+                                  className={`w-1.5 h-1.5 rounded-full ${
+                                    isSelected ? "bg-[#7CC09D]" : "bg-[#1F7A55]"
                                   }`}
-                                  title="From your profile"
+                                  title="From verified resume profile"
                                 />
                               )}
                             </button>
                           );
                         })}
                       </div>
+
+                      {/* Custom Input */}
+                      <div className="pt-2 flex items-center gap-2 max-w-md">
+                        <input
+                          type="text"
+                          value={customFocusInput}
+                          onChange={(e) => setCustomFocusInput(e.target.value)}
+                          placeholder="Or type custom framework/topic (e.g. FastAPI, Kafka, Spring Boot)..."
+                          className="w-full rounded-lg border border-[#D5D1C7] bg-[#FAF8F5] px-3.5 py-2 text-xs text-[#1A1918] placeholder-[#8E8B84] focus-visible:outline-2 focus-visible:outline-[#1A1918]"
+                        />
+                      </div>
                     </div>
 
-                    {/* Interactive Segmented Difficulty Selector */}
-                    <div className="space-y-2.5">
+                    {/* SECTION 4: DURATION */}
+                    <div className="space-y-3 pt-2 border-t border-[#E5E2DA]">
                       <div className="flex items-center justify-between">
-                        <label className="text-xs font-medium text-[#1A1918]">
-                          Difficulty Tier
+                        <label className="text-xs font-bold text-[#1A1918] uppercase tracking-wider font-mono">
+                          4. Session Duration
                         </label>
                         <span className="text-[11px] font-mono text-[#6E6B65]">
-                          Profile baseline: {interviewConfig.difficultyTier}
+                          Controls timer &amp; question volume
                         </span>
                       </div>
+
                       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
-                        {DIFFICULTY_TIERS.map((item) => {
-                          const selected = mockConfig.difficulty === item.value;
+                        {DURATION_OPTIONS.map((opt) => {
+                          const isSelected = selectedDuration === opt.minutes;
                           return (
                             <button
-                              key={item.value}
+                              key={opt.minutes}
                               type="button"
-                              onClick={() =>
-                                setMockConfig({
-                                  ...mockConfig,
-                                  difficulty: item.value,
-                                })
-                              }
+                              onClick={() => setSelectedDuration(opt.minutes)}
                               className={`rounded-lg border p-3 text-left transition-all active:scale-[0.98] focus-visible:outline-2 focus-visible:outline-[#1A1918] ${
-                                selected
+                                isSelected
                                   ? "border-[#1A1918] bg-[#FAF8F5] shadow-[inset_0_0_0_1px_#1A1918]"
-                                  : "border-[#E5E2DA] bg-[#FFFFFF] hover:border-[#C7C2B6] hover:bg-[#FAF8F5]/60"
+                                  : "border-[#E5E2DA] bg-[#FFFFFF] hover:border-[#D5D1C7] hover:bg-[#FAF8F5]/60"
                               }`}
                             >
                               <div className="flex items-center justify-between">
                                 <span className="text-xs font-semibold text-[#1A1918]">
-                                  {item.value}
+                                  {opt.label}
                                 </span>
                                 <span className="text-[10px] font-mono text-[#6E6B65]">
-                                  {item.tier}
+                                  {opt.questions}
                                 </span>
                               </div>
-                              <div className="text-[11px] text-[#6E6B65] mt-1">
-                                {item.desc}
+                              <div className="text-[11px] text-[#6E6B65] mt-0.5">
+                                {opt.desc}
                               </div>
                             </button>
                           );
@@ -758,226 +781,154 @@ export default function CandidateWorkspace() {
                       </div>
                     </div>
 
-                    {/* Focus Areas Driven by Profile */}
-                    {interviewConfig.focusAreas.length > 0 && (
-                      <div className="pt-4 border-t border-[#E5E2DA] flex flex-wrap items-center gap-2 text-[11px]">
-                        <span className="font-mono text-[#6E6B65] mr-1">
-                          Active signals:
-                        </span>
-                        {interviewConfig.focusAreas.slice(0, 6).map((area) => (
-                          <span
-                            key={area}
-                            className="rounded-md border border-[#E5E2DA] bg-[#FAF8F5] px-2 py-0.5 font-mono text-[#423F3A]"
-                          >
-                            {area}
-                          </span>
-                        ))}
+                    {/* ERROR NOTICE IF LAUNCH FAILS */}
+                    {launchError && (
+                      <div className="flex items-center gap-2 rounded-lg border border-[#E5C9C0] bg-[#FFF8F5] p-3 text-xs text-[#B45332]">
+                        <AlertCircle className="w-4 h-4 shrink-0" />
+                        <span>{launchError}</span>
                       </div>
                     )}
+
+                    {/* LAUNCH CTA */}
+                    <div className="pt-4 border-t border-[#E5E2DA] flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                      <div className="text-xs text-[#6E6B65] leading-relaxed">
+                        Launching opens a dedicated mock room with real-time AI prompts and audio/code evaluation.
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={handleLaunchMockInterview}
+                        disabled={isLaunchingSession}
+                        className="group inline-flex items-center justify-center gap-2 rounded-lg text-xs font-semibold bg-[#1A1918] text-[#FAF8F5] pl-5 pr-3 py-3 hover:bg-[#2C2A28] active:scale-[0.98] disabled:opacity-50 transition-all focus-visible:outline-2 focus-visible:outline-[#1A1918]"
+                      >
+                        <span>
+                          {isLaunchingSession
+                            ? "Creating Interview Room..."
+                            : "Launch Mock Interview Room"}
+                        </span>
+                        <span className="w-6 h-6 rounded-md bg-[#FAF8F5]/12 flex items-center justify-center transition-transform group-hover:translate-x-0.5">
+                          <ArrowRight className="w-3.5 h-3.5" />
+                        </span>
+                      </button>
+                    </div>
                   </div>
                 </div>
 
-                {/* Active Practice Question Studio */}
-                <AnimatePresence>
-                  {mockActive && activeMockQuestion && (
-                    <motion.div
-                      initial={{ opacity: 0, y: 12 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      exit={{ opacity: 0, y: -8 }}
-                      transition={{ duration: 0.25, ease: EASE_CURVE }}
-                      className="rounded-xl border border-[#1A1918] bg-[#FFFFFF] p-6 sm:p-7 space-y-5 shadow-[0_4px_16px_rgba(26,25,24,0.06)]"
-                    >
-                      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#E5E2DA] pb-4">
-                        <div className="flex items-center gap-2.5 text-xs font-mono">
-                          <span className="inline-flex items-center gap-1.5 rounded-md bg-[#EDF3EC] text-[#1F7A55] px-2.5 py-1 font-medium">
-                            <span className="w-1.5 h-1.5 rounded-xs bg-[#1F7A55]" />
-                            Live Prompt
-                          </span>
-                          <span className="text-[#423F3A]">
-                            {
-                              INTERVIEW_STAGES.find((s) => s.id === mockStage)
-                                ?.label
-                            }{" "}
-                            · {activeMockQuestion.topic}
-                          </span>
-                        </div>
-                        <span className="rounded-md border border-[#E5E2DA] bg-[#FAF8F5] px-2.5 py-1 text-[11px] font-mono text-[#1A1918]">
-                          {activeMockQuestion.difficulty}
-                        </span>
-                      </div>
-
-                      <div className="text-base sm:text-lg font-semibold text-[#1A1918] leading-relaxed max-w-prose">
-                        {activeMockQuestion.prompt}
-                      </div>
-
-                      <div className="space-y-2">
-                        <div className="flex items-center justify-between text-xs">
-                          <label
-                            htmlFor="mock-answer-input"
-                            className="font-medium text-[#423F3A]"
-                          >
-                            Your Technical Response
-                          </label>
-                          <span className="font-mono text-[11px] text-[#8E8B84] tabular-nums">
-                            {activeWordCount} words
-                          </span>
-                        </div>
-                        <textarea
-                          id="mock-answer-input"
-                          rows={6}
-                          value={currentAnswer}
-                          onChange={(e) => setCurrentAnswer(e.target.value)}
-                          onKeyDown={(e) => {
-                            if (
-                              (e.metaKey || e.ctrlKey) &&
-                              e.key === "Enter" &&
-                              currentAnswer.trim() &&
-                              !isEvaluating
-                            ) {
-                              e.preventDefault();
-                              handleSubmitMockAnswer();
-                            }
-                          }}
-                          placeholder="Outline your architecture, trade-offs, data flow, and failure recovery strategy..."
-                          className="w-full rounded-lg border border-[#D5D1C7] bg-[#FAF8F5] p-4 text-sm text-[#1A1918] placeholder-[#8E8B84] leading-relaxed focus-visible:outline-2 focus-visible:outline-[#1A1918]"
-                        />
-                      </div>
-
-                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-1">
-                        <div className="flex items-center gap-2 text-xs text-[#6E6B65]">
-                          <span>Evaluates Relevance, Depth, and Clarity</span>
-                          <span className="hidden sm:inline text-[#D5D1C7]">
-                            |
-                          </span>
-                          <kbd className="hidden sm:inline-block rounded border border-[#E5E2DA] bg-[#FAF8F5] px-1.5 py-0.5 font-mono text-[10px] text-[#55524C]">
-                            Ctrl + Enter
-                          </kbd>
-                        </div>
-                        <button
-                          onClick={handleSubmitMockAnswer}
-                          disabled={isEvaluating || !currentAnswer.trim()}
-                          className="inline-flex items-center justify-center rounded-lg text-xs font-medium bg-[#1A1918] text-[#FAF8F5] px-5 py-2.5 hover:bg-[#2C2A28] disabled:opacity-45 active:scale-[0.98] transition-all focus-visible:outline-2 focus-visible:outline-[#1A1918]"
-                        >
-                          <Send className="w-3.5 h-3.5 mr-2" strokeWidth={1.75} />
-                          <span>
-                            {isEvaluating
-                              ? "Scoring Response..."
-                              : "Submit Answer"}
-                          </span>
-                        </button>
-                      </div>
-                    </motion.div>
-                  )}
-                </AnimatePresence>
-
-                {/* Evaluated Answers History OR Composed Empty State */}
-                <div className="space-y-4">
+                {/* ========================================================== */}
+                {/* MOCK INTERVIEW SESSION HISTORY */}
+                {/* ========================================================== */}
+                <div className="space-y-4 pt-4">
                   <div className="flex items-center justify-between">
-                    <h2 className="text-xs font-mono text-[#6E6B65] uppercase tracking-wider">
-                      Session Evaluation History
-                    </h2>
+                    <div>
+                      <h2 className="text-xs font-mono text-[#6E6B65] uppercase tracking-wider">
+                        Mock Interview Session History
+                      </h2>
+                      <p className="text-xs text-[#55524C] mt-0.5">
+                        Click on any past session to inspect the complete question-by-question transcript and rubric scores.
+                      </p>
+                    </div>
                     <span className="text-xs font-mono text-[#6E6B65] tabular-nums">
-                      {evaluatedResponses.length}{" "}
-                      {evaluatedResponses.length === 1 ? "answer" : "answers"}{" "}
-                      scored
+                      {mockSessions.length}{" "}
+                      {mockSessions.length === 1 ? "session" : "sessions"} logged
                     </span>
                   </div>
 
-                  {evaluatedResponses.length === 0 ? (
-                    <div className="rounded-xl border border-[#E5E2DA] bg-[#FFFFFF] p-6 sm:p-8 flex flex-col sm:flex-row sm:items-center justify-between gap-6">
-                      <div className="space-y-2 max-w-lg">
-                        <div className="inline-flex items-center gap-2 text-xs font-medium text-[#1A1918]">
-                          <Layers
-                            className="w-4 h-4 text-[#1F7A55]"
-                            strokeWidth={1.75}
-                          />
-                          <span>Ready for your first response</span>
-                        </div>
-                        <p className="text-xs text-[#55524C] leading-relaxed">
-                          Start the mock interview above to answer a calibrated prompt. Every submission is scored out of 10 on Relevance, Technical Depth, and Communication Clarity, and updates your topic coverage report.
-                        </p>
+                  {mockSessions.length === 0 ? (
+                    <div className="rounded-xl border border-[#E5E2DA] bg-[#FFFFFF] p-8 text-center space-y-3">
+                      <div className="w-10 h-10 rounded-full border border-[#E5E2DA] bg-[#FAF8F5] flex items-center justify-center mx-auto text-[#6E6B65]">
+                        <Clock className="w-5 h-5" />
                       </div>
-
-                      <div className="grid grid-cols-3 gap-2 shrink-0 text-center font-mono">
-                        {["Relevance", "Depth", "Clarity"].map((axis) => (
-                          <div
-                            key={axis}
-                            className="rounded-lg border border-[#E5E2DA] bg-[#FAF8F5] px-3 py-2.5"
-                          >
-                            <div className="text-[10px] text-[#8E8B84] uppercase">
-                              {axis}
-                            </div>
-                            <div className="text-xs font-semibold text-[#1A1918] mt-1 tabular-nums">
-                              / 10
-                            </div>
-                          </div>
-                        ))}
+                      <div className="text-sm font-semibold text-[#1A1918]">
+                        No mock interviews completed yet
                       </div>
+                      <p className="text-xs text-[#6E6B65] max-w-sm mx-auto leading-relaxed">
+                        Configure your target topic and level above, then click &quot;Launch Mock Interview Room&quot; to practice your first session.
+                      </p>
                     </div>
                   ) : (
-                    <div className="space-y-4">
-                      {evaluatedResponses.map((item, idx) => (
-                        <div
-                          key={idx}
-                          className="rounded-xl border border-[#E5E2DA] bg-[#FFFFFF] p-6 space-y-4 shadow-[0_1px_2px_rgba(26,25,24,0.03)]"
-                        >
-                          <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
-                            <div className="flex items-center gap-2 font-mono text-[#6E6B65]">
-                              <span className="rounded-md bg-[#FAF8F5] border border-[#E5E2DA] px-2 py-0.5 text-[#1A1918]">
-                                {item.stage}
-                              </span>
-                              <span>{item.topic}</span>
-                            </div>
-                            <span className="font-mono font-bold text-[#1F7A55] rounded-md border border-[#CBE4D6] bg-[#EDF3EC] px-2.5 py-1 tabular-nums">
-                              Overall: {item.scores.overall} / 10
-                            </span>
-                          </div>
+                    <div className="space-y-3">
+                      {mockSessions.map((sessionItem) => {
+                        const dateFormatted = new Date(
+                          sessionItem.createdAt
+                        ).toLocaleDateString("en-US", {
+                          month: "short",
+                          day: "numeric",
+                          year: "numeric",
+                          hour: "2-digit",
+                          minute: "2-digit",
+                        });
 
-                          <div className="text-sm font-semibold text-[#1A1918] leading-snug">
-                            {item.question}
-                          </div>
-
-                          <div className="rounded-lg bg-[#FAF8F5] border border-[#E5E2DA] p-3.5 text-xs text-[#33312E] font-mono leading-relaxed">
-                            {item.answer}
-                          </div>
-
-                          {/* Tri-Factor Visual Rubric Bars */}
-                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1">
-                            {[
-                              { label: "Relevance", val: item.scores.relevance },
-                              { label: "Depth", val: item.scores.depth },
-                              { label: "Clarity", val: item.scores.clarity },
-                            ].map((metric) => (
-                              <div
-                                key={metric.label}
-                                className="rounded-lg border border-[#E5E2DA] bg-[#FAF8F5] p-3 space-y-2"
-                              >
-                                <div className="flex items-center justify-between text-xs font-mono">
-                                  <span className="text-[#6E6B65] text-[11px] uppercase">
-                                    {metric.label}
-                                  </span>
-                                  <span className="font-bold text-[#1A1918] tabular-nums">
-                                    {metric.val} / 10
-                                  </span>
-                                </div>
-                                <div className="w-full h-1.5 bg-[#E5E2DA] rounded-xs overflow-hidden">
-                                  <div
-                                    className="h-full bg-[#1A1918] rounded-xs"
-                                    style={{ width: `${metric.val * 10}%` }}
-                                  />
-                                </div>
+                        return (
+                          <div
+                            key={sessionItem._id}
+                            onClick={() =>
+                              setSelectedTranscriptSession(sessionItem)
+                            }
+                            className="rounded-xl border border-[#E5E2DA] bg-[#FFFFFF] p-5 hover:border-[#1A1918] cursor-pointer transition-all shadow-[0_1px_2px_rgba(26,25,24,0.02)] space-y-3"
+                          >
+                            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                              <div className="flex flex-wrap items-center gap-2 text-xs">
+                                <span className="font-bold text-[#1A1918] text-sm">
+                                  {sessionItem.title}
+                                </span>
+                                <span className="rounded-md border border-[#E5E2DA] bg-[#FAF8F5] px-2 py-0.5 font-mono text-[10px] text-[#423F3A] uppercase">
+                                  {sessionItem.interviewType}
+                                </span>
+                                <span className="rounded-md border border-[#CBE4D6] bg-[#EDF3EC] px-2 py-0.5 font-mono text-[10px] text-[#1F7A55]">
+                                  {sessionItem.level}
+                                </span>
                               </div>
-                            ))}
-                          </div>
 
-                          <div className="text-xs text-[#55524C] pt-3 border-t border-[#E5E2DA] leading-relaxed">
-                            <span className="font-semibold text-[#1A1918]">
-                              Evaluator Feedback:{" "}
-                            </span>
-                            {item.feedback}
+                              <div className="flex items-center gap-3">
+                                {sessionItem.status === "completed" && (
+                                  <span className="font-mono font-bold text-[#1F7A55] rounded-md border border-[#CBE4D6] bg-[#EDF3EC] px-2.5 py-1 text-xs tabular-nums">
+                                    Overall: {sessionItem.overallScore ?? "—"}/10
+                                  </span>
+                                )}
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setSelectedTranscriptSession(sessionItem);
+                                  }}
+                                  className="inline-flex items-center gap-1 text-xs font-medium text-[#1A1918] hover:underline"
+                                >
+                                  <Eye className="w-3.5 h-3.5" />
+                                  <span>View Transcript</span>
+                                </button>
+                              </div>
+                            </div>
+
+                            <div className="flex flex-wrap items-center justify-between text-xs text-[#6E6B65] border-t border-[#E5E2DA] pt-2.5">
+                              <div className="flex items-center gap-4">
+                                <span className="font-mono text-[11px]">
+                                  {dateFormatted}
+                                </span>
+                                <span>·</span>
+                                <span>{sessionItem.durationMinutes} min session</span>
+                                <span>·</span>
+                                <span>
+                                  {sessionItem.responses?.length || 0} of{" "}
+                                  {sessionItem.questions?.length || 0} questions
+                                  answered
+                                </span>
+                              </div>
+
+                              <span
+                                className={`text-[11px] font-mono font-semibold ${
+                                  sessionItem.status === "completed"
+                                    ? "text-[#1F7A55]"
+                                    : "text-[#B45332]"
+                                }`}
+                              >
+                                {sessionItem.status === "completed"
+                                  ? "Completed & Evaluated"
+                                  : "In Progress / Incomplete"}
+                              </span>
+                            </div>
                           </div>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   )}
                 </div>
@@ -1185,9 +1136,7 @@ export default function CandidateWorkspace() {
                         className="group inline-flex items-center justify-center gap-2 rounded-lg text-xs font-medium bg-[#1A1918] text-[#FAF8F5] pl-4 pr-2.5 py-2.5 hover:bg-[#2C2A28] active:scale-[0.98] transition-all shrink-0 focus-visible:outline-2 focus-visible:outline-[#1A1918]"
                       >
                         <span>Connect To Boardroom</span>
-                        <span className="w-6 h-6 rounded-md bg-[#FAF8F5]/12 flex items-center justify-center transition-transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5">
-                          <ArrowUpRight className="w-3.5 h-3.5" />
-                        </span>
+                        <ArrowRight className="w-3.5 h-3.5" />
                       </button>
                     </div>
 
@@ -1279,56 +1228,46 @@ export default function CandidateWorkspace() {
                     Recent Practice &amp; Evaluation Dossiers
                   </div>
 
-                  <div className="rounded-xl border border-[#E5E2DA] bg-[#F2EFE9] p-1.5">
-                    <div className="rounded-lg border border-[#E5E2DA] bg-[#FFFFFF] p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                      <div>
-                        <div className="text-sm font-semibold text-[#1A1918]">
-                          {interviewConfig.recommendedTrack}
-                        </div>
-                        <div className="text-xs text-[#6E6B65] mt-1 tabular-nums">
-                          {evaluatedResponses.length} responses scored in current session ·{" "}
-                          {interviewConfig.primaryTopics
-                            .slice(0, 2)
-                            .join(" & ")}
-                        </div>
-                      </div>
-
-                      <div className="flex items-center gap-4">
-                        <div className="text-right">
-                          <div className="font-mono text-base font-bold text-[#1A1918] tabular-nums">
-                            {sessionAverage ? `${sessionAverage} / 10` : "Ready"}
-                          </div>
-                          <div className="text-[10px] text-[#1F7A55] font-mono">
-                            {evaluatedResponses.length > 0
-                              ? "Session Average"
-                              : "No Answers Yet"}
-                          </div>
-                        </div>
-
-                        <button
-                          onClick={() => {
-                            logWorkspaceActivity(
-                              "Exported Audit Dossier",
-                              "interview",
-                              interviewConfig.recommendedTrack
-                            );
-                            setExportNotice(
-                              `Audit dossier for ${interviewConfig.recommendedTrack} compiled and logged to your activity record.`
-                            );
-                          }}
-                          className="inline-flex items-center gap-1.5 rounded-lg border border-[#D5D1C7] bg-[#FAF8F5] px-3.5 py-2 hover:bg-[#EFECE4] active:scale-[0.98] text-xs font-medium text-[#1A1918] transition-all"
-                        >
-                          <Download className="w-3.5 h-3.5" strokeWidth={1.75} />
-                          <span>Export Dossier</span>
-                        </button>
-                      </div>
+                  {completedSessions.length === 0 ? (
+                    <div className="rounded-xl border border-[#E5E2DA] bg-[#FFFFFF] p-6 text-xs text-[#6E6B65]">
+                      No completed interview dossiers yet. Practice an AI mock session to generate audit reports.
                     </div>
-                  </div>
+                  ) : (
+                    <div className="space-y-3">
+                      {completedSessions.map((sessionItem) => (
+                        <div
+                          key={sessionItem._id}
+                          className="rounded-xl border border-[#E5E2DA] bg-[#FFFFFF] p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4"
+                        >
+                          <div>
+                            <div className="text-sm font-semibold text-[#1A1918]">
+                              {sessionItem.title}
+                            </div>
+                            <div className="text-xs text-[#6E6B65] mt-1 tabular-nums">
+                              {sessionItem.responses?.length || 0} questions evaluated · {sessionItem.durationMinutes} min session
+                            </div>
+                          </div>
 
-                  {exportNotice && (
-                    <div className="flex items-center gap-2 rounded-lg border border-[#CBE4D6] bg-[#EDF3EC] px-3.5 py-2.5 text-xs text-[#1F7A55]">
-                      <CheckCircle2 className="w-4 h-4 shrink-0" />
-                      <span>{exportNotice}</span>
+                          <div className="flex items-center gap-4">
+                            <div className="text-right">
+                              <div className="font-mono text-base font-bold text-[#1A1918] tabular-nums">
+                                {sessionItem.overallScore ?? "—"} / 10
+                              </div>
+                              <div className="text-[10px] text-[#1F7A55] font-mono">
+                                Overall Score
+                              </div>
+                            </div>
+
+                            <button
+                              onClick={() => setSelectedTranscriptSession(sessionItem)}
+                              className="inline-flex items-center gap-1.5 rounded-lg border border-[#D5D1C7] bg-[#FAF8F5] px-3.5 py-2 hover:bg-[#EFECE4] active:scale-[0.98] text-xs font-medium text-[#1A1918] transition-all"
+                            >
+                              <Eye className="w-3.5 h-3.5" />
+                              <span>View Transcript</span>
+                            </button>
+                          </div>
+                        </div>
+                      ))}
                     </div>
                   )}
                 </div>
@@ -1358,6 +1297,186 @@ export default function CandidateWorkspace() {
           </AnimatePresence>
         </div>
       </main>
+
+      {/* ============================================================ */}
+      {/* FULL SESSION TRANSCRIPT DRAWER / MODAL */}
+      {/* ============================================================ */}
+      <AnimatePresence>
+        {selectedTranscriptSession && (
+          <div className="fixed inset-0 z-50 flex justify-end">
+            {/* Backdrop */}
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setSelectedTranscriptSession(null)}
+              className="fixed inset-0 bg-[#1A1918]/30 backdrop-blur-xs"
+            />
+
+            {/* Drawer Panel */}
+            <motion.div
+              initial={{ x: "100%" }}
+              animate={{ x: 0 }}
+              exit={{ x: "100%" }}
+              transition={{ duration: 0.3, ease: EASE_CURVE }}
+              className="relative w-full max-w-2xl bg-[#FAF8F5] border-l border-[#E5E2DA] h-full overflow-y-auto shadow-2xl p-6 sm:p-8 space-y-6 z-10"
+            >
+              {/* Drawer Header */}
+              <div className="flex items-start justify-between gap-4 border-b border-[#E5E2DA] pb-5">
+                <div className="space-y-1">
+                  <div className="flex flex-wrap items-center gap-2 text-xs">
+                    <span className="rounded-md border border-[#E5E2DA] bg-[#FFFFFF] px-2 py-0.5 font-mono text-[10px] text-[#423F3A] uppercase">
+                      {selectedTranscriptSession.interviewType}
+                    </span>
+                    <span className="rounded-md border border-[#CBE4D6] bg-[#EDF3EC] px-2 py-0.5 font-mono text-[10px] text-[#1F7A55]">
+                      {selectedTranscriptSession.level}
+                    </span>
+                    <span className="text-[#6E6B65] text-xs font-mono">
+                      {selectedTranscriptSession.durationMinutes} min
+                    </span>
+                  </div>
+                  <h2 className="text-xl font-bold text-[#1A1918]">
+                    {selectedTranscriptSession.title}
+                  </h2>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setSelectedTranscriptSession(null)}
+                  className="p-1.5 rounded-lg border border-[#E5E2DA] bg-[#FFFFFF] hover:bg-[#F2EFE9] text-[#6E6B65] hover:text-[#1A1918] transition-colors"
+                  title="Close Transcript"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              {/* Overall Score & Tri-factor Rubrics */}
+              <div className="rounded-xl border border-[#E5E2DA] bg-[#FFFFFF] p-5 space-y-4">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold font-mono text-[#6E6B65] uppercase">
+                    Evaluation Performance Summary
+                  </span>
+                  <span className="text-sm font-mono font-bold text-[#1F7A55] rounded border border-[#CBE4D6] bg-[#EDF3EC] px-3 py-1">
+                    Score: {selectedTranscriptSession.overallScore ?? "—"}/10
+                  </span>
+                </div>
+
+                {selectedTranscriptSession.categoryScores && (
+                  <div className="grid grid-cols-3 gap-2 text-center text-xs font-mono">
+                    <div className="rounded border border-[#E5E2DA] bg-[#FAF8F5] p-2.5">
+                      <div className="text-[10px] text-[#8E8B84]">RELEVANCE</div>
+                      <div className="text-sm font-bold text-[#1A1918] mt-0.5">
+                        {selectedTranscriptSession.categoryScores.relevance}/10
+                      </div>
+                    </div>
+                    <div className="rounded border border-[#E5E2DA] bg-[#FAF8F5] p-2.5">
+                      <div className="text-[10px] text-[#8E8B84]">DEPTH</div>
+                      <div className="text-sm font-bold text-[#1A1918] mt-0.5">
+                        {selectedTranscriptSession.categoryScores.depth}/10
+                      </div>
+                    </div>
+                    <div className="rounded border border-[#E5E2DA] bg-[#FAF8F5] p-2.5">
+                      <div className="text-[10px] text-[#8E8B84]">CLARITY</div>
+                      <div className="text-sm font-bold text-[#1A1918] mt-0.5">
+                        {selectedTranscriptSession.categoryScores.clarity}/10
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {selectedTranscriptSession.summaryFeedback && (
+                  <div className="text-xs text-[#423F3A] bg-[#FAF8F5] border border-[#E5E2DA] p-3 rounded-lg leading-relaxed">
+                    <span className="font-semibold text-[#1A1918]">
+                      AI Synthesis:{" "}
+                    </span>
+                    {selectedTranscriptSession.summaryFeedback}
+                  </div>
+                )}
+              </div>
+
+              {/* Step-by-Step Questions & Responses */}
+              <div className="space-y-4">
+                <div className="text-xs font-mono uppercase text-[#6E6B65]">
+                  Detailed Q&amp;A Log (
+                  {selectedTranscriptSession.responses?.length || 0} responses)
+                </div>
+
+                {selectedTranscriptSession.responses?.map(
+                  (resp: MockSessionResponse, idx: number) => (
+                    <div
+                      key={idx}
+                      className="rounded-xl border border-[#E5E2DA] bg-[#FFFFFF] p-5 space-y-3.5 shadow-xs"
+                    >
+                      <div className="flex items-center justify-between border-b border-[#E5E2DA] pb-2 text-xs">
+                        <span className="font-mono font-bold text-[#1A1918]">
+                          Question {idx + 1} ({resp.stage})
+                        </span>
+                        <span className="font-mono font-bold text-[#1F7A55]">
+                          {resp.scores.overall}/10
+                        </span>
+                      </div>
+
+                      <div className="text-xs font-semibold text-[#1A1918] leading-relaxed">
+                        {resp.questionPrompt}
+                      </div>
+
+                      {resp.codeSubmitted && (
+                        <div className="space-y-1">
+                          <div className="text-[10px] font-mono text-[#8E8B84]">
+                            Candidate Code ({resp.language || "Code"}):
+                          </div>
+                          <pre className="rounded bg-[#1A1918] text-[#FAF8F5] p-3 text-[11px] font-mono overflow-x-auto leading-relaxed">
+                            {resp.codeSubmitted}
+                          </pre>
+                        </div>
+                      )}
+
+                      {resp.userAnswer && (
+                        <div className="space-y-1">
+                          <div className="text-[10px] font-mono text-[#8E8B84]">
+                            Candidate Written Rationale:
+                          </div>
+                          <div className="bg-[#FAF8F5] border border-[#E5E2DA] rounded p-3 text-xs text-[#33312E] font-mono leading-relaxed whitespace-pre-wrap">
+                            {resp.userAnswer}
+                          </div>
+                        </div>
+                      )}
+
+                      <div className="grid grid-cols-3 gap-2 text-center text-[11px] font-mono pt-1">
+                        <div className="border border-[#E5E2DA] bg-[#FAF8F5] rounded p-1.5">
+                          <span className="text-[#8E8B84] text-[10px]">Rel:</span>{" "}
+                          <span className="font-bold text-[#1A1918]">
+                            {resp.scores.relevance}/10
+                          </span>
+                        </div>
+                        <div className="border border-[#E5E2DA] bg-[#FAF8F5] rounded p-1.5">
+                          <span className="text-[#8E8B84] text-[10px]">Depth:</span>{" "}
+                          <span className="font-bold text-[#1A1918]">
+                            {resp.scores.depth}/10
+                          </span>
+                        </div>
+                        <div className="border border-[#E5E2DA] bg-[#FAF8F5] rounded p-1.5">
+                          <span className="text-[#8E8B84] text-[10px]">Clarity:</span>{" "}
+                          <span className="font-bold text-[#1A1918]">
+                            {resp.scores.clarity}/10
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="text-[11px] text-[#55524C] pt-2 border-t border-[#E5E2DA] leading-relaxed">
+                        <span className="font-semibold text-[#1A1918]">
+                          Feedback:{" "}
+                        </span>
+                        {resp.feedback}
+                      </div>
+                    </div>
+                  )
+                )}
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
