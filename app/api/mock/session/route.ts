@@ -163,7 +163,22 @@ export async function POST(req: NextRequest) {
       );
     } catch (error) {
       await collection.deleteOne({ _id: result.insertedId }).catch(() => {});
-      throw error;
+      console.error(
+        "[POST /api/mock/session] question generation failed:",
+        error instanceof Error ? error.message : error
+      );
+      return NextResponse.json(
+        {
+          error: "Failed to generate interview questions.",
+          detail:
+            process.env.NODE_ENV === "development"
+              ? error instanceof Error
+                ? error.message
+                : "Unknown question generation error"
+              : "Question provider or server configuration is unavailable.",
+        },
+        { status: 500 }
+      );
     }
 
     // Log activity
