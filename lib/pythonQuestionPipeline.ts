@@ -262,7 +262,7 @@ export async function generateSessionQuestions(params: {
         toSessionQuestion(response, index + 1)
       ),
       provider: "gemini",
-      model: process.env.GEMINI_MODEL || "gemini-2.5-flash",
+      model: process.env.GEMINI_MODEL || "gemini-3.8-flash",
     };
   }
 
