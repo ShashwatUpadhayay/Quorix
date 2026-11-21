@@ -12,7 +12,6 @@ import {
   evaluateMockResponse,
   generateSessionSummary,
 } from "@/lib/mockInterviewEngine";
-import { getNextSessionQuestion } from "@/lib/questionPipeline/sessionBridge";
 
 interface RouteContext {
   params: Promise<{ id: string }>;
@@ -113,38 +112,8 @@ export async function POST(req: NextRequest, context: RouteContext) {
     let pipelineMeta = session.pipeline;
 
     if (!isCompleted) {
-      for (const requestedMode of ["auto", "select"] as const) {
-        try {
-          const generated = await getNextSessionQuestion({
-            session,
-            sessionId: id,
-            userId,
-            questionNumber: nextIndex + 1,
-            lastQuestion: currentQuestion.prompt,
-            lastAnswer: userAnswer || codeSubmitted,
-            lastScore: evaluation.scores.overall,
-            requestedMode,
-          });
-
-          nextQuestion = generated.sessionQuestion;
-          pipelineMeta = {
-            provider: generated.response.provider,
-            model: generated.response.model,
-            embeddingModel: generated.response.question.embeddingModel,
-            mode:
-              generated.response.source === "generated" ? "generate" : "select",
-          };
-          break;
-        } catch (error) {
-          console.error(
-            `[Mock Answer] Could not generate next question (${requestedMode}):`,
-            error instanceof Error ? error.message : error
-          );
-        }
-      }
-
+      nextQuestion = session.questions[nextIndex] || null;
       if (!nextQuestion) {
-        // Never leave the candidate stranded on a missing question.
         isCompleted = true;
       }
     }
