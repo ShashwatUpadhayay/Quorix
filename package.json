@@ -9,6 +9,8 @@
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
     "pipeline:doctor": "tsx scripts/pipeline-doctor.ts",
+    "pipeline:python:doctor": "python -m python_pipeline.cli doctor",
+    "pipeline:python": "python -m python_pipeline.cli generate",
     "seed:curated": "tsx scripts/seed-questions.ts --curated",
     "seed:questions": "tsx scripts/seed-questions.ts",
     "embed:bank": "tsx scripts/embed-bank.ts",

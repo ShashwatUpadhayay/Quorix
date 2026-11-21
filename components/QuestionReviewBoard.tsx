@@ -131,6 +131,7 @@ export default function QuestionReviewBoard({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [bulkBusy, setBulkBusy] = useState<"approve" | "reject" | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<EditForm | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -265,6 +266,52 @@ export default function QuestionReviewBoard({
     }
   };
 
+  const runBulkAction = async (action: "approve" | "reject") => {
+    const label = action === "approve" ? "approve" : "reject";
+    if (
+      !window.confirm(
+        `Are you sure you want to ${label} all matching draft questions?`
+      )
+    ) {
+      return;
+    }
+
+    setBulkBusy(action);
+    setError(null);
+    setNotice(null);
+    try {
+      const response = await fetch("/api/questions/review", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: action === "approve" ? "bulk-approve" : "bulk-reject",
+          domain,
+          stage,
+          q: query,
+        }),
+      });
+      const payload = await response.json();
+      if (!response.ok) {
+        throw new Error(payload.error || "Bulk review action failed.");
+      }
+      setNotice(
+        `${payload.updated} draft question${payload.updated === 1 ? "" : "s"} ${
+          action === "approve" ? "approved" : "rejected"
+        }.`
+      );
+      setPage(1);
+      await load();
+    } catch (bulkError) {
+      setError(
+        bulkError instanceof Error
+          ? bulkError.message
+          : "Bulk review action failed."
+      );
+    } finally {
+      setBulkBusy(null);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-[#FAF8F5] text-[#1A1918] p-5 sm:p-8 lg:p-12 font-sans selection:bg-[#E5E2DA]">
       <div className="max-w-6xl mx-auto space-y-8">
@@ -364,6 +411,38 @@ export default function QuestionReviewBoard({
                 {tab.label}
               </button>
             ))}
+
+            {status === "draft" && (
+              <>
+                <span className="mx-1 h-5 w-px bg-[#E5E2DA]" />
+                <button
+                  type="button"
+                  disabled={bulkBusy !== null || loading}
+                  onClick={() => void runBulkAction("approve")}
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-[#1F7A55] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#196546] disabled:opacity-50"
+                >
+                  {bulkBusy === "approve" ? (
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                  )}
+                  <span>Approve all drafts</span>
+                </button>
+                <button
+                  type="button"
+                  disabled={bulkBusy !== null || loading}
+                  onClick={() => void runBulkAction("reject")}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-[#E5C9C0] bg-[#FFF8F5] px-3 py-1.5 text-xs font-medium text-[#B45332] hover:bg-[#FAF3F0] disabled:opacity-50"
+                >
+                  {bulkBusy === "reject" ? (
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <XCircle className="w-3.5 h-3.5" />
+                  )}
+                  <span>Reject all drafts</span>
+                </button>
+              </>
+            )}
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">

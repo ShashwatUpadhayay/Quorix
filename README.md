@@ -13,6 +13,19 @@ approved bank questions on failure.
 - Commands: `npm run pipeline:doctor`, `npm run seed:curated`,
   `npm run seed:questions`, `npm run embed:bank`, `npm run eval:pipeline`
 
+### Python local pipeline
+
+The local-first question pipeline is available in `python_pipeline/` and only
+uses the Ollama HTTP API; it does not require MongoDB or Next.js for local
+generation.
+
+```bash
+ollama pull qwen2.5:7b
+npm run pipeline:python:doctor
+npm run pipeline:python -- --mode=generate --focus="Kafka" --level=Senior --tags="Kafka,Go"
+python -m unittest tests/test_python_question_pipeline.py
+```
+
 ## Getting Started
 
 First, run the development server:

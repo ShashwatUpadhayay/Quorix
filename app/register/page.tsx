@@ -40,7 +40,12 @@ export default function RegisterPage() {
 
       // Redirect to role-specific workspace
       const userRole = data.user?.role;
-      const destination = userRole === "expert" ? "/expert" : "/candidate";
+      const destination =
+        userRole === "admin"
+          ? "/admin/questions"
+          : userRole === "expert"
+            ? "/expert"
+            : "/candidate";
       router.push(destination);
       router.refresh();
     } catch (err: unknown) {
