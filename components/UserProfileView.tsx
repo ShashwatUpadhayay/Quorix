@@ -19,13 +19,11 @@ import {
   Briefcase,
   GraduationCap,
   Code2,
-  Activity,
   FileText,
 } from "lucide-react";
 import ResumeParserPanel from "@/components/ResumeParserPanel";
 import type {
   ProfileDoc,
-  ActivityLogDoc,
   SkillItem,
   ExperienceItem,
   EducationItem,
@@ -54,8 +52,6 @@ type DossierTab =
   | "publications"
   | "awards";
 
-type ActivityFilter = "all" | "interview" | "board" | "profile" | "auth";
-
 function toDateKey(date: Date): string {
   const y = date.getFullYear();
   const m = String(date.getMonth() + 1).padStart(2, "0");
@@ -73,16 +69,6 @@ function formatDisplayDate(dateKey: string): string {
   });
 }
 
-function formatRelativeTime(isoOrDate: string | Date): string {
-  const date = new Date(isoOrDate);
-  return date.toLocaleString("en-US", {
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-  });
-}
-
 function getHeatmapColor(count: number): string {
   if (count <= 0) return "#EFECE4";
   if (count === 1) return "#CBE4D6";
@@ -94,7 +80,6 @@ function getHeatmapColor(count: number): string {
 export default function UserProfileView({ onNameUpdated }: UserProfileViewProps) {
   const [user, setUser] = useState<SafeUser | null>(null);
   const [profile, setProfile] = useState<ProfileDoc | null>(null);
-  const [activities, setActivities] = useState<ActivityLogDoc[]>([]);
   const [dailyCounts, setDailyCounts] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -169,8 +154,7 @@ export default function UserProfileView({ onNameUpdated }: UserProfileViewProps)
     year: "",
   });
 
-  // Activity Filter State
-  const [activityFilter, setActivityFilter] = useState<ActivityFilter>("all");
+  // Activity Filter State removed (Activity Log section removed)
 
   const loadProfileData = useCallback(async () => {
     try {
@@ -182,7 +166,6 @@ export default function UserProfileView({ onNameUpdated }: UserProfileViewProps)
       const data = await res.json();
       setUser(data.user);
       setProfile(data.profile);
-      setActivities(data.activities || []);
       setDailyCounts(data.dailyCounts || {});
       setBasicForm({
         name: data.user?.name || "",
@@ -537,19 +520,6 @@ export default function UserProfileView({ onNameUpdated }: UserProfileViewProps)
 
     return { totalActions, activeDays, currentStreak };
   }, [dailyCounts]);
-
-  // Filtered activity timeline
-  const filteredActivities = useMemo(() => {
-    return activities.filter((act) => {
-      if (selectedDateFilter && act.dateKey !== selectedDateFilter) {
-        return false;
-      }
-      if (activityFilter !== "all" && act.category !== activityFilter) {
-        return false;
-      }
-      return true;
-    });
-  }, [activities, selectedDateFilter, activityFilter]);
 
   if (loading) {
     return (
@@ -1012,7 +982,7 @@ export default function UserProfileView({ onNameUpdated }: UserProfileViewProps)
               </h2>
             </div>
             <p className="text-xs text-[#6E6B65]">
-              Click any day cell to filter your activity log below.
+              Activity distribution across the past {heatmapWeeks} weeks.
             </p>
           </div>
 
@@ -1154,13 +1124,13 @@ export default function UserProfileView({ onNameUpdated }: UserProfileViewProps)
               </span>
             ) : selectedDateFilter ? (
               <span>
-                Filtering feed by{" "}
+                Selected{" "}
                 <strong className="text-[#1A1918]">
                   {formatDisplayDate(selectedDateFilter)}
                 </strong>
               </span>
             ) : (
-              <span>Hover a square for details or click to filter activity</span>
+              <span>Hover a square for details</span>
             )}
           </div>
 
@@ -1909,88 +1879,6 @@ export default function UserProfileView({ onNameUpdated }: UserProfileViewProps)
                 </div>
               )}
             </div>
-          </div>
-        )}
-      </section>
-
-      {/* ================================================================= */}
-      {/* 4. APP ACTIVITY FEED (Chronological Log of App Usage) */}
-      {/* ================================================================= */}
-      <section className="border border-[#E5E2DA] bg-[#FFFFFF] p-6 space-y-5">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <div className="flex items-center space-x-2">
-            <Activity className="w-4 h-4 text-[#1A1918]" />
-            <h2 className="text-base font-bold text-[#1A1918]">
-              Application Activity Log
-            </h2>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-2">
-            {selectedDateFilter && (
-              <button
-                type="button"
-                onClick={() => setSelectedDateFilter(null)}
-                className="inline-flex items-center space-x-1 border border-[#1A1918] bg-[#FAF8F5] px-2.5 py-1 text-[11px] font-mono text-[#1A1918]"
-              >
-                <span>{formatDisplayDate(selectedDateFilter)}</span>
-                <X className="w-3 h-3" />
-              </button>
-            )}
-
-            <div className="inline-flex border border-[#E5E2DA] bg-[#FAF8F5] text-[11px] font-mono">
-              {(
-                [
-                  { id: "all", label: "All" },
-                  { id: "interview", label: "Interviews" },
-                  { id: "board", label: "Boards" },
-                  { id: "profile", label: "Profile" },
-                  { id: "auth", label: "Auth" },
-                ] as const
-              ).map((cat) => (
-                <button
-                  key={cat.id}
-                  type="button"
-                  onClick={() => setActivityFilter(cat.id)}
-                  className={`px-2.5 py-1 border-r last:border-r-0 border-[#E5E2DA] transition-colors ${
-                    activityFilter === cat.id
-                      ? "bg-[#FFFFFF] text-[#1A1918] font-semibold"
-                      : "text-[#6E6B65] hover:text-[#1A1918]"
-                  }`}
-                >
-                  {cat.label}
-                </button>
-              ))}
-            </div>
-          </div>
-        </div>
-
-        {filteredActivities.length > 0 ? (
-          <div className="divide-y divide-[#E5E2DA] border border-[#E5E2DA]">
-            {filteredActivities.map((act, idx) => (
-              <div
-                key={act._id || `${act.dateKey}-${idx}`}
-                className="p-3.5 bg-[#FAF8F5]/60 flex flex-col sm:flex-row sm:items-center justify-between gap-2"
-              >
-                <div className="space-y-0.5">
-                  <div className="flex items-center space-x-2">
-                    <span className="border border-[#D5D1C7] bg-[#FFFFFF] px-1.5 py-0.5 text-[10px] font-mono uppercase text-[#423F3A]">
-                      {act.category}
-                    </span>
-                    <span className="text-xs font-semibold text-[#1A1918]">
-                      {act.action}
-                    </span>
-                  </div>
-                  <div className="text-xs text-[#55524C]">{act.detail}</div>
-                </div>
-                <div className="text-[11px] font-mono tabular-nums text-[#8E8B84] shrink-0">
-                  {formatRelativeTime(act.timestamp)}
-                </div>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <div className="border border-dashed border-[#D5D1C7] p-6 text-center text-xs text-[#6E6B65]">
-            No activity events match the current filter.
           </div>
         )}
       </section>

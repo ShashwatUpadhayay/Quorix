@@ -1,5 +1,18 @@
 This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
 
+## Question generation pipeline
+
+Mock interviews now select or generate questions dynamically at session start and
+after every answer, calibrated by the candidate profile, stage and difficulty.
+The pipeline supports Ollama (local dev) and Gemini (prod), stores a reviewed
+question bank in MongoDB, validates every generated question, and falls back to
+approved bank questions on failure.
+
+- Architecture and setup: [`docs/QUESTION_PIPELINE.md`](docs/QUESTION_PIPELINE.md)
+- Review UI: `/admin/questions` (admin or expert role)
+- Commands: `npm run pipeline:doctor`, `npm run seed:curated`,
+  `npm run seed:questions`, `npm run embed:bank`, `npm run eval:pipeline`
+
 ## Getting Started
 
 First, run the development server:

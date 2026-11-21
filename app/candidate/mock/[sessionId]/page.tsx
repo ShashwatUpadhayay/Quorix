@@ -251,7 +251,8 @@ export default function MockInterviewRoom({ params }: PageProps) {
   const isCompleted = session?.status === "completed";
   const responses = session?.responses || [];
   const currentNumber = (session?.currentQuestionIndex || 0) + 1;
-  const totalQuestions = session?.questions?.length || 1;
+  const totalQuestions =
+    session?.plannedQuestionCount || session?.questions?.length || 1;
 
   return (
     <div className="min-h-screen bg-[#FAF8F5] text-[#1A1918] flex flex-col font-sans selection:bg-[#E5E2DA]">

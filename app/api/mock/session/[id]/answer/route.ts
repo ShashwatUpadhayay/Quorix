@@ -1,12 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
 import { ObjectId } from "mongodb";
 import { getCurrentUser } from "@/lib/auth";
-import { getDatabase, MockSessionDoc, MockSessionResponse } from "@/lib/mongodb";
+import {
+  getDatabase,
+  MockSessionDoc,
+  MockSessionQuestion,
+  MockSessionResponse,
+} from "@/lib/mongodb";
 import { recordUserActivity } from "@/lib/activity";
 import {
   evaluateMockResponse,
   generateSessionSummary,
 } from "@/lib/mockInterviewEngine";
+import { getNextSessionQuestion } from "@/lib/questionPipeline/sessionBridge";
 
 interface RouteContext {
   params: Promise<{ id: string }>;
@@ -95,11 +101,57 @@ export async function POST(req: NextRequest, context: RouteContext) {
 
     const nextIndex = currentIndex + 1;
     const updatedResponses = [...(session.responses || []), newResponse];
-    const isCompleted = nextIndex >= session.questions.length;
+    const plannedQuestionCount =
+      session.plannedQuestionCount ||
+      Math.max(session.questions.length, nextIndex + 1);
+    let isCompleted = nextIndex >= plannedQuestionCount;
 
     let overallScore = session.overallScore;
     let categoryScores = session.categoryScores;
     let summaryFeedback = session.summaryFeedback;
+    let nextQuestion: MockSessionQuestion | null = null;
+    let pipelineMeta = session.pipeline;
+
+    if (!isCompleted) {
+      for (const requestedMode of ["auto", "select"] as const) {
+        try {
+          const generated = await getNextSessionQuestion({
+            session,
+            sessionId: id,
+            userId,
+            questionNumber: nextIndex + 1,
+            lastQuestion: currentQuestion.prompt,
+            lastAnswer: userAnswer || codeSubmitted,
+            lastScore: evaluation.scores.overall,
+            requestedMode,
+          });
+
+          nextQuestion = generated.sessionQuestion;
+          pipelineMeta = {
+            provider: generated.response.provider,
+            model: generated.response.model,
+            embeddingModel: generated.response.question.embeddingModel,
+            mode:
+              generated.response.source === "generated" ? "generate" : "select",
+          };
+          break;
+        } catch (error) {
+          console.error(
+            `[Mock Answer] Could not generate next question (${requestedMode}):`,
+            error instanceof Error ? error.message : error
+          );
+        }
+      }
+
+      if (!nextQuestion) {
+        // Never leave the candidate stranded on a missing question.
+        isCompleted = true;
+      }
+    }
+
+    const updatedQuestions = nextQuestion
+      ? [...session.questions, nextQuestion]
+      : session.questions;
 
     if (isCompleted) {
       const summary = generateSessionSummary(
@@ -125,7 +177,10 @@ export async function POST(req: NextRequest, context: RouteContext) {
       {
         $set: {
           responses: updatedResponses,
+          questions: updatedQuestions,
           currentQuestionIndex: nextIndex,
+          plannedQuestionCount,
+          pipeline: pipelineMeta,
           status: isCompleted ? "completed" : "in_progress",
           overallScore,
           categoryScores,
@@ -141,8 +196,9 @@ export async function POST(req: NextRequest, context: RouteContext) {
       evaluation,
       response: newResponse,
       isCompleted,
+      nextQuestion,
       nextQuestionIndex: nextIndex,
-      totalQuestions: session.questions.length,
+      totalQuestions: plannedQuestionCount,
       overallScore,
     });
   } catch (error: unknown) {

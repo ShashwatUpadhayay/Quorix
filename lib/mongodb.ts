@@ -67,6 +67,24 @@ export async function getDatabase(customDbName?: string): Promise<Db> {
 }
 
 /**
+ * Closes the cached client so offline scripts can exit cleanly.
+ * Intended for CLI jobs, not for long-lived server processes.
+ */
+export async function closeMongoClient(): Promise<void> {
+  try {
+    const client = await clientPromise;
+    await client.close();
+  } catch {
+    // Nothing to close, or the connection already failed.
+  } finally {
+    if (process.env.NODE_ENV === "development") {
+      delete globalWithMongo._mongoClientPromise;
+      delete globalWithMongo._mongoClientUri;
+    }
+  }
+}
+
+/**
  * Core User Document Schema
  */
 export interface UserDoc {
@@ -187,16 +205,38 @@ export type InterviewType =
   | "system_design"
   | "behavioral";
 
+export type MockSessionStage =
+  | "warmup"
+  | "core"
+  | "deep_dive"
+  | "scenario"
+  | "icebreaker"
+  | "technical"
+  | "techno_managerial";
+
 export interface MockSessionQuestion {
   id: string;
   order: number;
-  stage: "warmup" | "core" | "deep_dive" | "scenario";
+  stage: MockSessionStage;
   prompt: string;
   rubricHint: string;
   codeStarter?: string;
   constraints?: string[];
   examples?: Array<{ input: string; output: string; explanation?: string }>;
   expectedSignals?: string[];
+  /** Pipeline metadata (optional so legacy sessions keep working). */
+  topic?: string;
+  subtopic?: string;
+  difficulty?: number;
+  expectedPoints?: string[];
+  competencyTags?: string[];
+  source?: "curated" | "seeded" | "generated" | "fallback";
+  generationMeta?: {
+    provider?: string;
+    model?: string;
+    latencyMs?: number;
+    validationReason?: string;
+  };
 }
 
 export interface MockSessionResponse {
@@ -232,7 +272,15 @@ export interface MockSessionDoc {
   status: "in_progress" | "completed" | "abandoned";
   questions: MockSessionQuestion[];
   responses: MockSessionResponse[];
+  /** Total questions planned for the session (questions are generated lazily). */
+  plannedQuestionCount: number;
   currentQuestionIndex: number;
+  pipeline?: {
+    provider?: string;
+    model?: string;
+    embeddingModel?: string;
+    mode?: "select" | "generate";
+  };
   overallScore?: number;
   categoryScores?: {
     relevance: number;
