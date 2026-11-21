@@ -272,14 +272,14 @@ export interface MockSessionDoc {
   status: "in_progress" | "completed" | "abandoned";
   questions: MockSessionQuestion[];
   responses: MockSessionResponse[];
-  /** Total questions planned for the session (questions are generated lazily). */
+  /** Total questions planned and generated for the session. */
   plannedQuestionCount: number;
   currentQuestionIndex: number;
   pipeline?: {
     provider?: string;
     model?: string;
     embeddingModel?: string;
-    mode?: "select" | "generate";
+    mode?: "generate";
   };
   overallScore?: number;
   categoryScores?: {

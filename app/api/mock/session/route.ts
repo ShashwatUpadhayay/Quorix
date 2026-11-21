@@ -3,7 +3,7 @@ import { getCurrentUser } from "@/lib/auth";
 import { getDatabase, MockSessionDoc, DifficultyTier, InterviewType } from "@/lib/mongodb";
 import { recordUserActivity } from "@/lib/activity";
 import { getQuestionCountForDuration } from "@/lib/mockInterviewEngine";
-import { getNextSessionQuestion } from "@/lib/questionPipeline/sessionBridge";
+import { generateSessionQuestions } from "@/lib/pythonQuestionPipeline";
 
 const TIER_NUMERIC_MAP: Record<DifficultyTier, number> = {
   Foundational: 1,
@@ -118,22 +118,37 @@ export async function POST(req: NextRequest) {
     const sessionId = result.insertedId.toString();
 
     try {
-      // Questions are generated lazily. Only the ice-breaker is selected at
-      // session start; follow-ups are generated after each answer.
-      const first = await getNextSessionQuestion({
-        session: newSession,
+      const profile = await db.collection("profiles").findOne({ userId });
+      const profileDoc = profile as {
+        skills?: Array<{ name?: string }>;
+        headline?: string;
+        interviewConfig?: {
+          experienceYears?: number;
+          primaryTopics?: string[];
+          focusAreas?: string[];
+        };
+      } | null;
+
+      const generated = await generateSessionQuestions({
         sessionId,
-        userId,
-        questionNumber: 1,
-        requestedMode: "select",
+        interviewType,
+        level,
+        focus,
+        count: plannedQuestionCount,
+        experienceYears:
+          profileDoc?.interviewConfig?.experienceYears || 0,
+        tags: (profileDoc?.skills || [])
+          .map((skill) => skill.name)
+          .filter((name): name is string => Boolean(name)),
+        topics: profileDoc?.interviewConfig?.primaryTopics || [],
+        focusAreas: profileDoc?.interviewConfig?.focusAreas || [],
       });
 
-      newSession.questions = [first.sessionQuestion];
+      newSession.questions = generated.questions;
       newSession.pipeline = {
-        provider: first.response.provider,
-        model: first.response.model,
-        embeddingModel: first.response.question.embeddingModel,
-        mode: "select",
+        provider: generated.provider,
+        model: generated.model,
+        mode: "generate",
       };
 
       await collection.updateOne(

@@ -10,8 +10,7 @@ approved bank questions on failure.
 
 - Architecture and setup: [`docs/QUESTION_PIPELINE.md`](docs/QUESTION_PIPELINE.md)
 - Review UI: `/admin/questions` (admin or expert role)
-- Commands: `npm run pipeline:doctor`, `npm run seed:curated`,
-  `npm run seed:questions`, `npm run embed:bank`, `npm run eval:pipeline`
+- Commands: `npm run pipeline:python:doctor`, `npm run pipeline:python`
 
 ### Python local pipeline
 
