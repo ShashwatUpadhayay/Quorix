@@ -7,6 +7,7 @@ from math import sqrt
 from typing import Iterable
 
 from .ollama import OllamaClient, OllamaError
+from .gemini import GeminiClient, GeminiError
 
 
 STAGES = ("icebreaker", "technical", "techno_managerial")
@@ -156,8 +157,16 @@ QUESTION_SCHEMA = {
 
 
 class QuestionPipeline:
-    def __init__(self, ollama: OllamaClient | None = None) -> None:
+    def __init__(
+        self,
+        ollama: OllamaClient | None = None,
+        gemini: GeminiClient | None = None,
+    ) -> None:
         self.ollama = ollama or OllamaClient()
+        self.gemini = gemini or GeminiClient()
+        self.provider = os.getenv("LLM_PROVIDER", "ollama").lower()
+        if self.provider not in ("ollama", "gemini"):
+            self.provider = "ollama"
 
     def run(self, request: QuestionRequest) -> dict:
         domain = resolve_domain(request)
@@ -171,7 +180,10 @@ class QuestionPipeline:
             request.planned_question_count,
         )
 
-        if request.mode in ("auto", "generate") and self.ollama.reachable():
+        if request.mode in ("auto", "generate") and (
+            (self.provider == "ollama" and self.ollama.reachable())
+            or (self.provider == "gemini" and self.gemini.reachable())
+        ):
             for attempt in range(1, 3):
                 try:
                     question = self._generate(
@@ -186,11 +198,11 @@ class QuestionPipeline:
                         False,
                         "Generated and accepted by local validation",
                     )
-                except (OllamaError, ValueError, KeyError) as error:
+                except (OllamaError, GeminiError, ValueError, KeyError) as error:
                     reason = str(error)
             return self._fallback(
                 domain, stage, difficulty,
-                f"Ollama generation failed; served local fallback. Reason: {reason}",
+                f"{self.provider} generation failed; served local fallback. Reason: {reason}",
                 2,
             )
 
@@ -204,13 +216,21 @@ class QuestionPipeline:
         )
 
     def doctor(self) -> dict:
-        reachable = self.ollama.reachable()
-        models = self.ollama.list_models() if reachable else []
+        if self.provider == "gemini":
+            reachable = self.gemini.reachable()
+            models = [self.gemini.model] if reachable else []
+            model = self.gemini.model
+        else:
+            reachable = self.ollama.reachable()
+            models = self.ollama.list_models() if reachable else []
+            model = self.ollama.model
         return {
-            "ollama_reachable": reachable,
+            "provider": self.provider,
+            "provider_reachable": reachable,
+            "ollama_reachable": reachable if self.provider == "ollama" else None,
             "ollama_url": self.ollama.base_url,
-            "model": self.ollama.model,
-            "model_installed": self.ollama.model in models,
+            "model": model,
+            "model_installed": model in models,
             "models": models,
         }
 
@@ -269,12 +289,20 @@ Local style examples:
 
 Return exactly this JSON object:
 {{"text":"...","topic":"{domain}","subtopic":"...","difficulty":{difficulty},"stage":"{stage}","expectedPoints":["..."],"competencyTags":["..."]}}"""
-        result = self.ollama.generate_json(
-            system=system,
-            prompt=prompt,
-            schema=QUESTION_SCHEMA,
-            temperature=0.75 if attempt == 1 else 0.55,
-        )
+        if self.provider == "gemini":
+            result = self.gemini.generate_json(
+                system=system,
+                prompt=prompt,
+                schema=QUESTION_SCHEMA,
+                temperature=0.75 if attempt == 1 else 0.55,
+            )
+        else:
+            result = self.ollama.generate_json(
+                system=system,
+                prompt=prompt,
+                schema=QUESTION_SCHEMA,
+                temperature=0.75 if attempt == 1 else 0.55,
+            )
         data = result.data
         text = str(data["text"]).strip()
         if len(text) < 24:
@@ -320,8 +348,12 @@ Return exactly this JSON object:
             "accepted": True,
             "reason": reason,
             "attempts": attempts,
-            "provider": "ollama" if source == "generated" else "local",
-            "model": self.ollama.model if source == "generated" else "curated-bank",
+            "provider": self.provider if source == "generated" else "local",
+            "model": (
+                (self.gemini.model if self.provider == "gemini" else self.ollama.model)
+                if source == "generated"
+                else "curated-bank"
+            ),
             "cached": False,
             "fallbackUsed": fallback_used,
         }

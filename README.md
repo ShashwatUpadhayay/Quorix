@@ -25,6 +25,21 @@ npm run pipeline:python -- --mode=generate --focus="Kafka" --level=Senior --tags
 python -m unittest tests/test_python_question_pipeline.py
 ```
 
+### Production: Gemini
+
+Set these server-side variables on the hosting platform:
+
+```env
+LLM_PROVIDER=gemini
+GEMINI_API_KEY=<your-server-side-key>
+GEMINI_MODEL=gemini-2.5-flash
+GEMINI_API_BASE_URL=https://generativelanguage.googleapis.com/v1beta
+```
+
+Never prefix the Gemini key with `NEXT_PUBLIC_`. Production session creation uses
+the Gemini HTTP API directly; it does not require Python to be available on the
+Node hosting runtime. Local development continues to use Ollama.
+
 ## Getting Started
 
 First, run the development server:
