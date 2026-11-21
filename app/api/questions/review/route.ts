@@ -109,6 +109,52 @@ export async function PATCH(req: NextRequest) {
     }
 
     const body = await req.json().catch(() => ({}));
+
+    if (body.action === "bulk-approve" || body.action === "bulk-reject") {
+      const filter: Record<string, unknown> = { status: "draft" };
+      if (typeof body.domain === "string" && body.domain) {
+        if (DOMAIN_NAMES.includes(body.domain)) filter.topic = body.domain;
+      }
+      if (typeof body.stage === "string" && body.stage) {
+        if ((PIPELINE_STAGES as readonly string[]).includes(body.stage)) {
+          filter.stage = body.stage;
+        }
+      }
+      if (typeof body.q === "string" && body.q.trim()) {
+        const search = escapeRegex(body.q.trim());
+        filter.$or = [
+          { text: { $regex: search, $options: "i" } },
+          { subtopic: { $regex: search, $options: "i" } },
+          { competencyTags: { $regex: search, $options: "i" } },
+        ];
+      }
+
+      const db = await getDatabase();
+      const questions = await db
+        .collection<QuestionDoc>("questions")
+        .find(filter)
+        .project({ _id: 1 })
+        .toArray();
+
+      const action = body.action === "bulk-approve" ? "approve" : "reject";
+      let updated = 0;
+      for (const question of questions) {
+        if (!question._id) continue;
+        const result = await reviewQuestion({
+          id: question._id.toString(),
+          action,
+          reviewer: user.email || user.name || user._id || "reviewer",
+        });
+        if (result.updated) updated += 1;
+      }
+
+      return NextResponse.json({
+        success: true,
+        updated,
+        stats: await getBankStats(),
+      });
+    }
+
     const parsed = ReviewActionSchema.safeParse(body);
     if (!parsed.success) {
       return NextResponse.json(

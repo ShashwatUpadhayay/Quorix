@@ -31,7 +31,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const validRoles = ["candidate", "expert", "admin"];
+    const validRoles = ["candidate", "expert"];
     const assignedRole = validRoles.includes(role) ? role : "candidate";
 
     const normalizedEmail = email.trim().toLowerCase();
