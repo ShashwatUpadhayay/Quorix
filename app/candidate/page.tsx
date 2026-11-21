@@ -6,26 +6,22 @@ import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Play,
-  FileText,
   Calendar,
   BarChart3,
   User,
   LogOut,
-  Plus,
   X,
-  Code2,
-  Terminal,
-  Cpu,
-  Users,
   Clock,
   ArrowRight,
   ShieldCheck,
   Eye,
   CheckCircle2,
   AlertCircle,
+  ChevronDown,
+  RotateCcw,
+  Sparkles,
 } from "lucide-react";
 import UserProfileView from "@/components/UserProfileView";
-import ResumeParserPanel from "@/components/ResumeParserPanel";
 import type {
   DifficultyTier,
   InterviewConfig,
@@ -67,31 +63,26 @@ const INTERVIEW_TYPES: Array<{
   id: InterviewType;
   title: string;
   desc: string;
-  icon: React.ComponentType<{ className?: string }>;
 }> = [
   {
     id: "coding",
     title: "Coding & Algorithms",
     desc: "Data structures, algorithmic problem solving & live code editor",
-    icon: Code2,
   },
   {
     id: "technical",
     title: "Technical Systems",
     desc: "Framework internals, memory, concurrency & runtime mechanics",
-    icon: Terminal,
   },
   {
     id: "system_design",
     title: "System Design",
     desc: "Distributed scalability, storage, caching & high availability",
-    icon: Cpu,
   },
   {
     id: "behavioral",
     title: "Behavioral & Leadership",
     desc: "STAR methodology, high-stakes incidents & trade-off decisions",
-    icon: Users,
   },
 ];
 
@@ -129,7 +120,7 @@ export default function CandidateWorkspace() {
 
   // Active module in sidebar
   const [activeFeature, setActiveFeature] = useState<
-    "mock" | "resume" | "boards" | "reports" | "profile"
+    "mock" | "boards" | "reports" | "profile"
   >("mock");
 
   // Profile-backed Skills & Interview Calibration
@@ -137,16 +128,16 @@ export default function CandidateWorkspace() {
   const [interviewConfig, setInterviewConfig] = useState<InterviewConfig>(
     DEFAULT_INTERVIEW_CONFIG
   );
-  const [newSkillInput, setNewSkillInput] = useState("");
 
-  // New Mock Interview Setup State
+  // Progressive Mock Interview Setup State (dropdowns shown step-by-step)
   const [selectedInterviewType, setSelectedInterviewType] =
-    useState<InterviewType>("technical");
+    useState<InterviewType | "">("");
   const [selectedLevel, setSelectedLevel] =
-    useState<DifficultyTier>("Intermediate");
-  const [selectedFocus, setSelectedFocus] = useState<string>("Backend & APIs");
+    useState<DifficultyTier | "">("");
+  const [selectedFocus, setSelectedFocus] = useState<string>("");
   const [customFocusInput, setCustomFocusInput] = useState("");
-  const [selectedDuration, setSelectedDuration] = useState<number>(30);
+  const [isCustomFocus, setIsCustomFocus] = useState(false);
+  const [selectedDuration, setSelectedDuration] = useState<number | null>(null);
   const [isLaunchingSession, setIsLaunchingSession] = useState(false);
   const [launchError, setLaunchError] = useState<string | null>(null);
 
@@ -170,10 +161,6 @@ export default function CandidateWorkspace() {
         data.profile?.interviewConfig || DEFAULT_INTERVIEW_CONFIG;
       setProfileSkills(loadedSkills);
       setInterviewConfig(loadedConfig);
-      setSelectedLevel(loadedConfig.difficultyTier || "Intermediate");
-      if (loadedConfig.primaryTopics?.[0]) {
-        setSelectedFocus(loadedConfig.primaryTopics[0]);
-      }
     } catch {
       // Ignored
     }
@@ -215,17 +202,6 @@ export default function CandidateWorkspace() {
         setLoading(false);
       });
   }, [router, hydrateFromProfile, fetchPastSessions]);
-
-  const availableFocusTags = useMemo(() => {
-    const fromProfile = profileSkills.map((s) => s.name);
-    return Array.from(
-      new Set([
-        ...interviewConfig.primaryTopics,
-        ...fromProfile,
-        ...POPULAR_FRAMEWORKS_AND_LANGUAGES,
-      ])
-    );
-  }, [profileSkills, interviewConfig.primaryTopics]);
 
   const practicedTopics = useMemo(() => {
     return mockSessions.flatMap((s) => [s.focus, ...(s.questions?.map((q) => q.stage) || [])]);
@@ -272,11 +248,41 @@ export default function CandidateWorkspace() {
     }).catch(() => {});
   };
 
+  const handleResetConfiguration = () => {
+    setSelectedInterviewType("");
+    setSelectedLevel("");
+    setSelectedFocus("");
+    setCustomFocusInput("");
+    setIsCustomFocus(false);
+    setSelectedDuration(null);
+    setLaunchError(null);
+  };
+
+  const handleApplyProfileRecommendation = () => {
+    setSelectedInterviewType("technical");
+    setSelectedLevel(interviewConfig.difficultyTier || "Intermediate");
+    setSelectedFocus(
+      profileSkills[0]?.name || interviewConfig.primaryTopics?.[0] || "Backend & APIs"
+    );
+    setIsCustomFocus(false);
+    setCustomFocusInput("");
+    setSelectedDuration(30);
+    setLaunchError(null);
+  };
+
   const handleLaunchMockInterview = async () => {
-    setIsLaunchingSession(true);
     setLaunchError(null);
 
-    const activeFocus = customFocusInput.trim() || selectedFocus;
+    const activeFocus = isCustomFocus
+      ? customFocusInput.trim()
+      : (selectedFocus || customFocusInput.trim());
+
+    if (!selectedInterviewType || !selectedLevel || !activeFocus || !selectedDuration) {
+      setLaunchError("Please complete all four selection dropdowns to launch the interview.");
+      return;
+    }
+
+    setIsLaunchingSession(true);
 
     try {
       const res = await fetch("/api/mock/session", {
@@ -297,6 +303,8 @@ export default function CandidateWorkspace() {
 
       if (data.roomUrl) {
         router.push(data.roomUrl);
+      } else {
+        throw new Error("No interview room URL returned.");
       }
     } catch (err: unknown) {
       setLaunchError(
@@ -304,58 +312,6 @@ export default function CandidateWorkspace() {
       );
       setIsLaunchingSession(false);
     }
-  };
-
-  const syncSkillsToProfile = async (
-    updatedSkills: SkillItem[],
-    activityLabel: string,
-    activityDetail: string
-  ) => {
-    setProfileSkills(updatedSkills);
-    try {
-      const res = await fetch("/api/profile", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          skills: updatedSkills,
-          activityLabel,
-          activityDetail,
-        }),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        if (data.profile?.interviewConfig) {
-          setInterviewConfig(data.profile.interviewConfig);
-        }
-      }
-    } catch {
-      // Ignored
-    }
-  };
-
-  const handleAddSkill = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newSkillInput.trim()) return;
-    const trimmed = newSkillInput.trim();
-    if (
-      !profileSkills.some((s) => s.name.toLowerCase() === trimmed.toLowerCase())
-    ) {
-      const nextSkills: SkillItem[] = [
-        ...profileSkills,
-        { id: `sk-${Date.now()}`, name: trimmed, level: "Core" },
-      ];
-      syncSkillsToProfile(nextSkills, "Added Competency Tag", trimmed);
-    }
-    setNewSkillInput("");
-  };
-
-  const handleRemoveSkill = (skillToRemove: SkillItem) => {
-    const nextSkills = profileSkills.filter((s) => s.id !== skillToRemove.id);
-    syncSkillsToProfile(
-      nextSkills,
-      "Removed Competency Tag",
-      skillToRemove.name
-    );
   };
 
   if (loading) {
@@ -385,12 +341,6 @@ export default function CandidateWorkspace() {
       icon: Play,
     },
     {
-      id: "resume",
-      label: "Resume & Skills",
-      desc: "Auto-build & verify",
-      icon: FileText,
-    },
-    {
       id: "boards",
       label: "Live Boardrooms",
       desc: "Panel sessions",
@@ -405,7 +355,7 @@ export default function CandidateWorkspace() {
     {
       id: "profile",
       label: "My Profile",
-      desc: "Dossier & daily activity",
+      desc: "Dossier, skills & resume",
       icon: User,
     },
   ] as const;
@@ -583,202 +533,301 @@ export default function CandidateWorkspace() {
                   </div>
                 </div>
 
-                {/* DOUBLE-BEZEL INTERVIEW CONFIGURATION CARD */}
+                {/* DOUBLE-BEZEL PROGRESSIVE DROPDOWN INTERVIEW CONFIGURATION CARD */}
                 <div className="rounded-2xl border border-[#E5E2DA] bg-[#F7F4EE] p-1.5">
-                  <div className="rounded-xl border border-[#E5E2DA] bg-[#FFFFFF] p-6 sm:p-8 space-y-7 shadow-[0_1px_2px_rgba(26,25,24,0.03)]">
-                    {/* SECTION 1: INTERVIEW TYPE */}
-                    <div className="space-y-3">
-                      <div className="flex items-center justify-between">
-                        <label className="text-xs font-bold text-[#1A1918] uppercase tracking-wider font-mono">
-                          1. Select Interview Type
-                        </label>
-                        <span className="text-[11px] font-mono text-[#6E6B65]">
-                          Choose your assessment format
-                        </span>
+                  <div className="rounded-xl border border-[#E5E2DA] bg-[#FFFFFF] p-6 sm:p-8 space-y-6 shadow-[0_1px_2px_rgba(26,25,24,0.03)]">
+                    {/* Header with Step Tracker & Quick-Fill Actions */}
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-5 border-b border-[#E5E2DA] gap-3">
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-2">
+                          <span className="w-2 h-2 rounded-full bg-[#1F7A55]" />
+                          <h2 className="text-sm font-bold text-[#1A1918] tracking-tight">
+                            Progressive Interview Setup
+                          </h2>
+                        </div>
+                        <p className="text-xs text-[#55524C]">
+                          Select your preferences sequentially. Each choice unlocks the next calibration field.
+                        </p>
                       </div>
 
-                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-                        {INTERVIEW_TYPES.map((type) => {
-                          const Icon = type.icon;
-                          const isSelected = selectedInterviewType === type.id;
-                          return (
-                            <button
-                              key={type.id}
-                              type="button"
-                              onClick={() => setSelectedInterviewType(type.id)}
-                              className={`rounded-xl border p-4 text-left transition-all active:scale-[0.98] focus-visible:outline-2 focus-visible:outline-[#1A1918] ${
-                                isSelected
-                                  ? "border-[#1A1918] bg-[#FAF8F5] shadow-[inset_0_0_0_1px_#1A1918]"
-                                  : "border-[#E5E2DA] bg-[#FFFFFF] hover:border-[#D5D1C7] hover:bg-[#FAF8F5]/60"
-                              }`}
-                            >
-                              <div className="flex items-center justify-between">
-                                <div
-                                  className={`w-7 h-7 rounded-md flex items-center justify-center ${
-                                    isSelected
-                                      ? "bg-[#1A1918] text-[#FAF8F5]"
-                                      : "bg-[#EFECE4] text-[#423F3A]"
-                                  }`}
-                                >
-                                  <Icon className="w-4 h-4" />
-                                </div>
-                                {isSelected && (
-                                  <span className="w-1.5 h-1.5 rounded-full bg-[#1F7A55]" />
-                                )}
-                              </div>
-                              <div className="text-xs font-bold text-[#1A1918] mt-3">
-                                {type.title}
-                              </div>
-                              <div className="text-[11px] text-[#6E6B65] mt-1 leading-snug">
-                                {type.desc}
-                              </div>
-                            </button>
-                          );
-                        })}
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={handleApplyProfileRecommendation}
+                          className="inline-flex items-center gap-1.5 rounded-lg border border-[#D5D1C7] bg-[#FAF8F5] px-2.5 py-1.5 text-[11px] font-mono text-[#1A1918] hover:bg-[#EFECE4] transition-colors focus-visible:outline-2 focus-visible:outline-[#1A1918]"
+                          title="Auto-fill recommended settings based on your verified profile"
+                        >
+                          <Sparkles className="w-3.5 h-3.5 text-[#1F7A55]" />
+                          <span>Profile Defaults</span>
+                        </button>
+
+                        {(selectedInterviewType || selectedLevel || selectedFocus || selectedDuration) && (
+                          <button
+                            type="button"
+                            onClick={handleResetConfiguration}
+                            className="inline-flex items-center gap-1 rounded-lg border border-[#E5E2DA] bg-[#FFFFFF] px-2.5 py-1.5 text-[11px] font-mono text-[#6E6B65] hover:text-[#B45332] hover:border-[#E5C9C0] transition-colors focus-visible:outline-2 focus-visible:outline-[#1A1918]"
+                            title="Reset all selections"
+                          >
+                            <RotateCcw className="w-3 h-3" />
+                            <span>Reset</span>
+                          </button>
+                        )}
                       </div>
                     </div>
 
-                    {/* SECTION 2: SENIORITY / DIFFICULTY LEVEL */}
-                    <div className="space-y-3 pt-2 border-t border-[#E5E2DA]">
-                      <div className="flex items-center justify-between">
-                        <label className="text-xs font-bold text-[#1A1918] uppercase tracking-wider font-mono">
-                          2. Experience Level &amp; Depth
-                        </label>
-                        <span className="text-[11px] font-mono text-[#6E6B65]">
-                          Calibrated to resume: {interviewConfig.difficultyTier}
-                        </span>
-                      </div>
-
-                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
-                        {DIFFICULTY_TIERS.map((tier) => {
-                          const isSelected = selectedLevel === tier.value;
-                          return (
-                            <button
-                              key={tier.value}
-                              type="button"
-                              onClick={() => setSelectedLevel(tier.value)}
-                              className={`rounded-lg border p-3.5 text-left transition-all active:scale-[0.98] focus-visible:outline-2 focus-visible:outline-[#1A1918] ${
-                                isSelected
-                                  ? "border-[#1A1918] bg-[#FAF8F5] shadow-[inset_0_0_0_1px_#1A1918]"
-                                  : "border-[#E5E2DA] bg-[#FFFFFF] hover:border-[#D5D1C7] hover:bg-[#FAF8F5]/60"
-                              }`}
-                            >
-                              <div className="flex items-center justify-between">
-                                <span className="text-xs font-semibold text-[#1A1918]">
-                                  {tier.value}
-                                </span>
-                                <span className="text-[10px] font-mono text-[#6E6B65]">
-                                  {tier.tier}
-                                </span>
-                              </div>
-                              <div className="text-[11px] text-[#6E6B65] mt-1">
-                                {tier.desc}
-                              </div>
-                            </button>
-                          );
-                        })}
-                      </div>
+                    {/* Step Progress Tracker */}
+                    <div className="flex items-center gap-2 font-mono text-[11px] text-[#6E6B65] pb-1 overflow-x-auto">
+                      <span className={selectedInterviewType ? "text-[#1F7A55] font-semibold" : "text-[#1A1918] font-bold"}>
+                        1. Format
+                      </span>
+                      <span>›</span>
+                      <span className={selectedLevel ? "text-[#1F7A55] font-semibold" : selectedInterviewType ? "text-[#1A1918] font-bold" : "text-[#A8A49C]"}>
+                        2. Level
+                      </span>
+                      <span>›</span>
+                      <span className={(isCustomFocus ? customFocusInput.trim() : selectedFocus) ? "text-[#1F7A55] font-semibold" : (selectedInterviewType && selectedLevel) ? "text-[#1A1918] font-bold" : "text-[#A8A49C]"}>
+                        3. Topic
+                      </span>
+                      <span>›</span>
+                      <span className={selectedDuration ? "text-[#1F7A55] font-semibold" : (selectedInterviewType && selectedLevel && (isCustomFocus ? customFocusInput.trim() : selectedFocus)) ? "text-[#1A1918] font-bold" : "text-[#A8A49C]"}>
+                        4. Duration
+                      </span>
                     </div>
 
-                    {/* SECTION 3: FRAMEWORK, LANGUAGE OR SPECIALIZED TOPIC */}
-                    <div className="space-y-3 pt-2 border-t border-[#E5E2DA]">
-                      <div className="flex items-center justify-between">
-                        <label className="text-xs font-bold text-[#1A1918] uppercase tracking-wider font-mono">
-                          3. Framework, Language, or Domain Focus
-                        </label>
-                        <span className="text-[11px] font-mono text-[#6E6B65]">
-                          Select or enter custom topic
-                        </span>
+                    {/* Progressive Dropdowns */}
+                    <div className="space-y-5">
+                      {/* ── STEP 1: INTERVIEW FORMAT (Always Visible) ── */}
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between">
+                          <label htmlFor="field-type" className="text-xs font-bold text-[#1A1918] font-mono uppercase tracking-wider flex items-center gap-2">
+                            <span className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold ${selectedInterviewType ? "bg-[#1F7A55] text-white" : "bg-[#1A1918] text-[#FAF8F5]"}`}>
+                              {selectedInterviewType ? "✓" : "1"}
+                            </span>
+                            <span>Interview Format</span>
+                          </label>
+                          <span className="text-[11px] font-mono text-[#6E6B65]">
+                            Assessment Category
+                          </span>
+                        </div>
+
+                        <div className="relative">
+                          <select
+                            id="field-type"
+                            value={selectedInterviewType}
+                            onChange={(e) => {
+                              setSelectedInterviewType(e.target.value as InterviewType);
+                            }}
+                            className={`w-full appearance-none rounded-lg border bg-[#FFFFFF] px-3.5 py-3 pr-10 text-xs font-medium text-[#1A1918] transition-all cursor-pointer focus-visible:outline-2 focus-visible:outline-[#1A1918] ${
+                              selectedInterviewType
+                                ? "border-[#1A1918] bg-[#FAF8F5]/60 shadow-[inset_0_0_0_1px_#1A1918]"
+                                : "border-[#D5D1C7] hover:border-[#1A1918]"
+                            }`}
+                          >
+                            <option value="" disabled>
+                              Select interview format (Coding, Technical, System Design, Behavioral)...
+                            </option>
+                            {INTERVIEW_TYPES.map((type) => (
+                              <option key={type.id} value={type.id}>
+                                {type.title} — {type.desc}
+                              </option>
+                            ))}
+                          </select>
+                          <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-3.5 text-[#6E6B65]">
+                            <ChevronDown className="w-4 h-4" />
+                          </div>
+                        </div>
                       </div>
 
-                      {/* Chips */}
-                      <div className="flex flex-wrap gap-2">
-                        {availableFocusTags.slice(0, 14).map((tag) => {
-                          const isSelected =
-                            selectedFocus === tag && !customFocusInput.trim();
-                          const isFromProfile = profileSkills.some(
-                            (s) => s.name.toLowerCase() === tag.toLowerCase()
-                          );
-                          return (
-                            <button
-                              key={tag}
-                              type="button"
-                              onClick={() => {
-                                setSelectedFocus(tag);
-                                setCustomFocusInput("");
+                      {/* ── STEP 2: DIFFICULTY LEVEL (Revealed once Step 1 is chosen) ── */}
+                      {Boolean(selectedInterviewType) && (
+                        <motion.div
+                          initial={{ opacity: 0, y: 8 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          transition={{ duration: 0.2 }}
+                          className="space-y-2 pt-4 border-t border-[#E5E2DA]"
+                        >
+                          <div className="flex items-center justify-between">
+                            <label htmlFor="field-level" className="text-xs font-bold text-[#1A1918] font-mono uppercase tracking-wider flex items-center gap-2">
+                              <span className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold ${selectedLevel ? "bg-[#1F7A55] text-white" : "bg-[#1A1918] text-[#FAF8F5]"}`}>
+                                {selectedLevel ? "✓" : "2"}
+                              </span>
+                              <span>Seniority &amp; Depth Tier</span>
+                            </label>
+                            <span className="text-[11px] font-mono text-[#6E6B65]">
+                              Profile calibration: {interviewConfig.difficultyTier || "Intermediate"}
+                            </span>
+                          </div>
+
+                          <div className="relative">
+                            <select
+                              id="field-level"
+                              value={selectedLevel}
+                              onChange={(e) => setSelectedLevel(e.target.value as DifficultyTier)}
+                              className={`w-full appearance-none rounded-lg border bg-[#FFFFFF] px-3.5 py-3 pr-10 text-xs font-medium text-[#1A1918] transition-all cursor-pointer focus-visible:outline-2 focus-visible:outline-[#1A1918] ${
+                                selectedLevel
+                                  ? "border-[#1A1918] bg-[#FAF8F5]/60 shadow-[inset_0_0_0_1px_#1A1918]"
+                                  : "border-[#D5D1C7] hover:border-[#1A1918]"
+                              }`}
+                            >
+                              <option value="" disabled>
+                                Select seniority and difficulty tier...
+                              </option>
+                              {DIFFICULTY_TIERS.map((tier) => (
+                                <option key={tier.value} value={tier.value}>
+                                  {tier.value} ({tier.tier}) — {tier.desc}
+                                </option>
+                              ))}
+                            </select>
+                            <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-3.5 text-[#6E6B65]">
+                              <ChevronDown className="w-4 h-4" />
+                            </div>
+                          </div>
+                        </motion.div>
+                      )}
+
+                      {/* ── STEP 3: TOPIC / LANGUAGE / FRAMEWORK (Revealed once Step 2 is chosen) ── */}
+                      {Boolean(selectedInterviewType && selectedLevel) && (
+                        <motion.div
+                          initial={{ opacity: 0, y: 8 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          transition={{ duration: 0.2 }}
+                          className="space-y-2 pt-4 border-t border-[#E5E2DA]"
+                        >
+                          <div className="flex items-center justify-between">
+                            <label htmlFor="field-focus" className="text-xs font-bold text-[#1A1918] font-mono uppercase tracking-wider flex items-center gap-2">
+                              <span className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold ${(isCustomFocus ? customFocusInput.trim() : selectedFocus) ? "bg-[#1F7A55] text-white" : "bg-[#1A1918] text-[#FAF8F5]"}`}>
+                                {(isCustomFocus ? customFocusInput.trim() : selectedFocus) ? "✓" : "3"}
+                              </span>
+                              <span>Framework, Language, or Domain</span>
+                            </label>
+                            <span className="text-[11px] font-mono text-[#6E6B65]">
+                              Target technology
+                            </span>
+                          </div>
+
+                          <div className="relative">
+                            <select
+                              id="field-focus"
+                              value={isCustomFocus ? "__custom__" : selectedFocus}
+                              onChange={(e) => {
+                                if (e.target.value === "__custom__") {
+                                  setIsCustomFocus(true);
+                                  setSelectedFocus("");
+                                } else {
+                                  setIsCustomFocus(false);
+                                  setSelectedFocus(e.target.value);
+                                  setCustomFocusInput("");
+                                }
                               }}
-                              className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs transition-all active:scale-[0.98] focus-visible:outline-2 focus-visible:outline-[#1A1918] ${
-                                isSelected
-                                  ? "bg-[#1A1918] text-[#FAF8F5] font-medium border border-[#1A1918]"
-                                  : "bg-[#FAF8F5] text-[#423F3A] border border-[#E5E2DA] hover:border-[#B5B1A7] hover:text-[#1A1918]"
+                              className={`w-full appearance-none rounded-lg border bg-[#FFFFFF] px-3.5 py-3 pr-10 text-xs font-medium text-[#1A1918] transition-all cursor-pointer focus-visible:outline-2 focus-visible:outline-[#1A1918] ${
+                                (isCustomFocus || selectedFocus)
+                                  ? "border-[#1A1918] bg-[#FAF8F5]/60 shadow-[inset_0_0_0_1px_#1A1918]"
+                                  : "border-[#D5D1C7] hover:border-[#1A1918]"
                               }`}
                             >
-                              <span>{tag}</span>
-                              {isFromProfile && (
-                                <span
-                                  className={`w-1.5 h-1.5 rounded-full ${
-                                    isSelected ? "bg-[#7CC09D]" : "bg-[#1F7A55]"
-                                  }`}
-                                  title="From verified resume profile"
-                                />
+                              <option value="" disabled>
+                                Select framework, language, or technical focus...
+                              </option>
+                              {profileSkills.length > 0 && (
+                                <optgroup label="From Your Verified Profile">
+                                  {profileSkills.map((s) => (
+                                    <option key={s.id} value={s.name}>
+                                      ★ {s.name} ({s.level})
+                                    </option>
+                                  ))}
+                                </optgroup>
                               )}
-                            </button>
-                          );
-                        })}
-                      </div>
+                              {interviewConfig.primaryTopics?.length > 0 && (
+                                <optgroup label="Recommended Domains">
+                                  {interviewConfig.primaryTopics.map((top) => (
+                                    <option key={top} value={top}>
+                                      {top}
+                                    </option>
+                                  ))}
+                                </optgroup>
+                              )}
+                              <optgroup label="Languages &amp; Frameworks">
+                                {POPULAR_FRAMEWORKS_AND_LANGUAGES.map((lang) => (
+                                  <option key={lang} value={lang}>
+                                    {lang}
+                                  </option>
+                                ))}
+                              </optgroup>
+                              <option value="__custom__">+ Enter custom framework or topic...</option>
+                            </select>
+                            <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-3.5 text-[#6E6B65]">
+                              <ChevronDown className="w-4 h-4" />
+                            </div>
+                          </div>
 
-                      {/* Custom Input */}
-                      <div className="pt-2 flex items-center gap-2 max-w-md">
-                        <input
-                          type="text"
-                          value={customFocusInput}
-                          onChange={(e) => setCustomFocusInput(e.target.value)}
-                          placeholder="Or type custom framework/topic (e.g. FastAPI, Kafka, Spring Boot)..."
-                          className="w-full rounded-lg border border-[#D5D1C7] bg-[#FAF8F5] px-3.5 py-2 text-xs text-[#1A1918] placeholder-[#8E8B84] focus-visible:outline-2 focus-visible:outline-[#1A1918]"
-                        />
-                      </div>
-                    </div>
+                          {isCustomFocus && (
+                            <motion.div
+                              initial={{ opacity: 0, height: 0 }}
+                              animate={{ opacity: 1, height: "auto" }}
+                              className="pt-2"
+                            >
+                              <input
+                                type="text"
+                                value={customFocusInput}
+                                onChange={(e) => {
+                                  setCustomFocusInput(e.target.value);
+                                  setSelectedFocus(e.target.value);
+                                }}
+                                placeholder="Type specific framework or topic (e.g. FastAPI, Kafka, Spring Boot)..."
+                                className="w-full rounded-lg border border-[#D5D1C7] bg-[#FFFFFF] px-3.5 py-2.5 text-xs text-[#1A1918] placeholder-[#8E8B84] focus-visible:outline-2 focus-visible:outline-[#1A1918]"
+                                autoFocus
+                              />
+                            </motion.div>
+                          )}
+                        </motion.div>
+                      )}
 
-                    {/* SECTION 4: DURATION */}
-                    <div className="space-y-3 pt-2 border-t border-[#E5E2DA]">
-                      <div className="flex items-center justify-between">
-                        <label className="text-xs font-bold text-[#1A1918] uppercase tracking-wider font-mono">
-                          4. Session Duration
-                        </label>
-                        <span className="text-[11px] font-mono text-[#6E6B65]">
-                          Controls timer &amp; question volume
-                        </span>
-                      </div>
+                      {/* ── STEP 4: DURATION (Revealed once Step 3 is chosen) ── */}
+                      {Boolean(selectedInterviewType && selectedLevel && (isCustomFocus ? customFocusInput.trim() : selectedFocus)) && (
+                        <motion.div
+                          initial={{ opacity: 0, y: 8 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          transition={{ duration: 0.2 }}
+                          className="space-y-2 pt-4 border-t border-[#E5E2DA]"
+                        >
+                          <div className="flex items-center justify-between">
+                            <label htmlFor="field-duration" className="text-xs font-bold text-[#1A1918] font-mono uppercase tracking-wider flex items-center gap-2">
+                              <span className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold ${selectedDuration ? "bg-[#1F7A55] text-white" : "bg-[#1A1918] text-[#FAF8F5]"}`}>
+                                {selectedDuration ? "✓" : "4"}
+                              </span>
+                              <span>Session Duration &amp; Volume</span>
+                            </label>
+                            <span className="text-[11px] font-mono text-[#6E6B65]">
+                              Timer &amp; Question Quota
+                            </span>
+                          </div>
 
-                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
-                        {DURATION_OPTIONS.map((opt) => {
-                          const isSelected = selectedDuration === opt.minutes;
-                          return (
-                            <button
-                              key={opt.minutes}
-                              type="button"
-                              onClick={() => setSelectedDuration(opt.minutes)}
-                              className={`rounded-lg border p-3 text-left transition-all active:scale-[0.98] focus-visible:outline-2 focus-visible:outline-[#1A1918] ${
-                                isSelected
-                                  ? "border-[#1A1918] bg-[#FAF8F5] shadow-[inset_0_0_0_1px_#1A1918]"
-                                  : "border-[#E5E2DA] bg-[#FFFFFF] hover:border-[#D5D1C7] hover:bg-[#FAF8F5]/60"
+                          <div className="relative">
+                            <select
+                              id="field-duration"
+                              value={selectedDuration || ""}
+                              onChange={(e) => setSelectedDuration(Number(e.target.value))}
+                              className={`w-full appearance-none rounded-lg border bg-[#FFFFFF] px-3.5 py-3 pr-10 text-xs font-medium text-[#1A1918] transition-all cursor-pointer focus-visible:outline-2 focus-visible:outline-[#1A1918] ${
+                                selectedDuration
+                                  ? "border-[#1A1918] bg-[#FAF8F5]/60 shadow-[inset_0_0_0_1px_#1A1918]"
+                                  : "border-[#D5D1C7] hover:border-[#1A1918]"
                               }`}
                             >
-                              <div className="flex items-center justify-between">
-                                <span className="text-xs font-semibold text-[#1A1918]">
-                                  {opt.label}
-                                </span>
-                                <span className="text-[10px] font-mono text-[#6E6B65]">
-                                  {opt.questions}
-                                </span>
-                              </div>
-                              <div className="text-[11px] text-[#6E6B65] mt-0.5">
-                                {opt.desc}
-                              </div>
-                            </button>
-                          );
-                        })}
-                      </div>
+                              <option value="" disabled>
+                                Select session duration...
+                              </option>
+                              {DURATION_OPTIONS.map((opt) => (
+                                <option key={opt.minutes} value={opt.minutes}>
+                                  {opt.label} — {opt.questions} ({opt.desc})
+                                </option>
+                              ))}
+                            </select>
+                            <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-3.5 text-[#6E6B65]">
+                              <ChevronDown className="w-4 h-4" />
+                            </div>
+                          </div>
+                        </motion.div>
+                      )}
                     </div>
 
                     {/* ERROR NOTICE IF LAUNCH FAILS */}
@@ -789,28 +838,56 @@ export default function CandidateWorkspace() {
                       </div>
                     )}
 
-                    {/* LAUNCH CTA */}
-                    <div className="pt-4 border-t border-[#E5E2DA] flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                      <div className="text-xs text-[#6E6B65] leading-relaxed">
-                        Launching opens a dedicated mock room with real-time AI prompts and audio/code evaluation.
-                      </div>
-
-                      <button
-                        type="button"
-                        onClick={handleLaunchMockInterview}
-                        disabled={isLaunchingSession}
-                        className="group inline-flex items-center justify-center gap-2 rounded-lg text-xs font-semibold bg-[#1A1918] text-[#FAF8F5] pl-5 pr-3 py-3 hover:bg-[#2C2A28] active:scale-[0.98] disabled:opacity-50 transition-all focus-visible:outline-2 focus-visible:outline-[#1A1918]"
+                    {/* ── STEP 5: READY TO LAUNCH SUMMARY & CTA ── */}
+                    {Boolean(selectedInterviewType && selectedLevel && (isCustomFocus ? customFocusInput.trim() : selectedFocus) && selectedDuration) && (
+                      <motion.div
+                        initial={{ opacity: 0, y: 8 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ duration: 0.2 }}
+                        className="pt-5 border-t border-[#E5E2DA] space-y-4"
                       >
-                        <span>
-                          {isLaunchingSession
-                            ? "Creating Interview Room..."
-                            : "Launch Mock Interview Room"}
-                        </span>
-                        <span className="w-6 h-6 rounded-md bg-[#FAF8F5]/12 flex items-center justify-center transition-transform group-hover:translate-x-0.5">
-                          <ArrowRight className="w-3.5 h-3.5" />
-                        </span>
-                      </button>
-                    </div>
+                        <div className="rounded-xl border border-[#D5D1C7] bg-[#FAF8F5] p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                          <div className="space-y-1">
+                            <div className="text-[10px] font-mono uppercase tracking-wider text-[#6E6B65]">
+                              Configured Interview Setup
+                            </div>
+                            <div className="text-xs font-semibold text-[#1A1918] flex flex-wrap items-center gap-2">
+                              <span className="bg-[#FFFFFF] border border-[#E5E2DA] px-2 py-0.5 rounded text-[11px] font-mono">
+                                {INTERVIEW_TYPES.find((t) => t.id === selectedInterviewType)?.title}
+                              </span>
+                              <span className="text-[#8E8B84]">•</span>
+                              <span className="bg-[#FFFFFF] border border-[#E5E2DA] px-2 py-0.5 rounded text-[11px] font-mono">
+                                {selectedLevel}
+                              </span>
+                              <span className="text-[#8E8B84]">•</span>
+                              <span className="bg-[#FFFFFF] border border-[#E5E2DA] px-2 py-0.5 rounded text-[11px] font-mono text-[#1F7A55] font-bold">
+                                {isCustomFocus ? customFocusInput.trim() : selectedFocus}
+                              </span>
+                              <span className="text-[#8E8B84]">•</span>
+                              <span className="bg-[#FFFFFF] border border-[#E5E2DA] px-2 py-0.5 rounded text-[11px] font-mono">
+                                {selectedDuration} mins
+                              </span>
+                            </div>
+                          </div>
+
+                          <button
+                            type="button"
+                            onClick={handleLaunchMockInterview}
+                            disabled={isLaunchingSession}
+                            className="group inline-flex items-center justify-center gap-2 rounded-lg text-xs font-semibold bg-[#1A1918] text-[#FAF8F5] pl-5 pr-3 py-3 hover:bg-[#2C2A28] active:scale-[0.98] disabled:opacity-50 transition-all focus-visible:outline-2 focus-visible:outline-[#1A1918] shrink-0"
+                          >
+                            <span>
+                              {isLaunchingSession
+                                ? "Creating Interview Room..."
+                                : "Launch Mock Interview Room"}
+                            </span>
+                            <span className="w-6 h-6 rounded-md bg-[#FAF8F5]/12 flex items-center justify-center transition-transform group-hover:translate-x-0.5">
+                              <ArrowRight className="w-3.5 h-3.5" />
+                            </span>
+                          </button>
+                        </div>
+                      </motion.div>
+                    )}
                   </div>
                 </div>
 
@@ -936,113 +1013,7 @@ export default function CandidateWorkspace() {
             )}
 
             {/* ========================================================== */}
-            {/* FEATURE 2: RESUME PARSER & SKILL TAGS */}
-            {/* ========================================================== */}
-            {activeFeature === "resume" && (
-              <motion.div
-                key="resume"
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -6 }}
-                transition={{ duration: 0.24, ease: EASE_CURVE }}
-                className="space-y-8"
-              >
-                <div className="border-b border-[#E5E2DA] pb-6 space-y-1.5">
-                  <div className="inline-flex items-center gap-2 text-xs font-mono text-[#6E6B65]">
-                    <span className="w-2 h-2 rounded-xs bg-[#1F7A55]" />
-                    <span>Resume Intelligence &amp; Competency Sync</span>
-                  </div>
-                  <h1 className="text-3xl font-bold tracking-tight text-[#1A1918]">
-                    Resume Parser &amp; Domain Verification
-                  </h1>
-                  <p className="text-sm text-[#55524C] leading-relaxed max-w-prose">
-                    Upload or paste your resume to populate your dossier and calibrate interview difficulty and topic focus across the studio.
-                  </p>
-                </div>
-
-                <div className="rounded-xl border border-[#E5E2DA] bg-[#F2EFE9] p-1.5">
-                  <div className="rounded-lg bg-[#FFFFFF] p-1">
-                    <ResumeParserPanel
-                      onProfileSynced={({ updatedName }) => {
-                        hydrateFromProfile();
-                        if (updatedName) {
-                          setUser((prev) =>
-                            prev ? { ...prev, name: updatedName } : prev
-                          );
-                        }
-                      }}
-                    />
-                  </div>
-                </div>
-
-                {/* Verified Domain Competencies */}
-                <div className="rounded-xl border border-[#E5E2DA] bg-[#FFFFFF] p-6 space-y-5 shadow-[0_1px_2px_rgba(26,25,24,0.03)]">
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-4 border-b border-[#E5E2DA]">
-                    <div>
-                      <h2 className="text-sm font-semibold text-[#1A1918]">
-                        Verified Domain Competencies
-                      </h2>
-                      <p className="text-xs text-[#6E6B65] mt-0.5">
-                        These tags guide adaptive question generation and topic coverage audits.
-                      </p>
-                    </div>
-                    <span className="rounded-md border border-[#E5E2DA] bg-[#FAF8F5] px-2.5 py-1 text-xs font-mono text-[#1A1918] tabular-nums w-fit">
-                      {profileSkills.length} active
-                    </span>
-                  </div>
-
-                  {profileSkills.length > 0 ? (
-                    <div className="flex flex-wrap gap-2">
-                      {profileSkills.map((skill) => (
-                        <span
-                          key={skill.id}
-                          className="inline-flex items-center gap-2 rounded-md border border-[#D5D1C7] bg-[#FAF8F5] px-3 py-1.5 text-xs text-[#1A1918]"
-                        >
-                          <span className="font-medium">{skill.name}</span>
-                          <span className="text-[10px] font-mono text-[#6E6B65]">
-                            {skill.level}
-                          </span>
-                          <button
-                            onClick={() => handleRemoveSkill(skill)}
-                            className="text-[#8E8B84] hover:text-[#B45332] transition-colors focus-visible:outline-1 focus-visible:outline-[#1A1918]"
-                            title={`Remove ${skill.name}`}
-                          >
-                            <X className="w-3 h-3" />
-                          </button>
-                        </span>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="rounded-lg border border-dashed border-[#D5D1C7] bg-[#FAF8F5] p-5 text-xs text-[#6E6B65]">
-                      No verified competencies yet. Parse your resume above or add tags manually below.
-                    </div>
-                  )}
-
-                  <form
-                    onSubmit={handleAddSkill}
-                    className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 pt-2"
-                  >
-                    <input
-                      type="text"
-                      value={newSkillInput}
-                      onChange={(e) => setNewSkillInput(e.target.value)}
-                      placeholder="Add competence tag (e.g. Kubernetes, gRPC, Redis)..."
-                      className="rounded-lg border border-[#D5D1C7] bg-[#FAF8F5] px-3.5 py-2 text-xs text-[#1A1918] placeholder-[#8E8B84] focus-visible:outline-2 focus-visible:outline-[#1A1918] sm:max-w-sm w-full"
-                    />
-                    <button
-                      type="submit"
-                      className="inline-flex items-center justify-center rounded-lg text-xs font-medium bg-[#1A1918] text-[#FAF8F5] px-4 py-2 hover:bg-[#2C2A28] active:scale-[0.98] transition-all focus-visible:outline-2 focus-visible:outline-[#1A1918]"
-                    >
-                      <Plus className="w-3.5 h-3.5 mr-1.5" />
-                      <span>Add Tag</span>
-                    </button>
-                  </form>
-                </div>
-              </motion.div>
-            )}
-
-            {/* ========================================================== */}
-            {/* FEATURE 3: LIVE BOARDROOM PANELS */}
+            {/* FEATURE 2: LIVE BOARDROOM PANELS */}
             {/* ========================================================== */}
             {activeFeature === "boards" && (
               <motion.div

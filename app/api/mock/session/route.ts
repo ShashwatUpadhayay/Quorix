@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth";
 import { getDatabase, MockSessionDoc, DifficultyTier, InterviewType } from "@/lib/mongodb";
 import { recordUserActivity } from "@/lib/activity";
-import { generateMockSessionQuestions } from "@/lib/mockInterviewEngine";
+import { getQuestionCountForDuration } from "@/lib/mockInterviewEngine";
+import { getNextSessionQuestion } from "@/lib/questionPipeline/sessionBridge";
 
 const TIER_NUMERIC_MAP: Record<DifficultyTier, number> = {
   Foundational: 1,
@@ -81,13 +82,7 @@ export async function POST(req: NextRequest) {
         : "Fullstack Architecture";
 
     const durationMinutes = Number(body.durationMinutes) || 30;
-
-    const questions = generateMockSessionQuestions({
-      interviewType,
-      level,
-      focus,
-      durationMinutes,
-    });
+    const plannedQuestionCount = getQuestionCountForDuration(durationMinutes);
 
     const typeLabels: Record<InterviewType, string> = {
       coding: "Coding & Algorithms",
@@ -108,8 +103,9 @@ export async function POST(req: NextRequest) {
       focus,
       durationMinutes,
       status: "in_progress",
-      questions,
+      questions: [],
       responses: [],
+      plannedQuestionCount,
       currentQuestionIndex: 0,
       startedAt: new Date(),
       createdAt: new Date(),
@@ -117,18 +113,50 @@ export async function POST(req: NextRequest) {
     };
 
     const db = await getDatabase();
-    const result = await db
-      .collection<MockSessionDoc>("mock_sessions")
-      .insertOne(newSession);
-
+    const collection = db.collection<MockSessionDoc>("mock_sessions");
+    const result = await collection.insertOne(newSession);
     const sessionId = result.insertedId.toString();
+
+    try {
+      // Questions are generated lazily. Only the ice-breaker is selected at
+      // session start; follow-ups are generated after each answer.
+      const first = await getNextSessionQuestion({
+        session: newSession,
+        sessionId,
+        userId,
+        questionNumber: 1,
+        requestedMode: "select",
+      });
+
+      newSession.questions = [first.sessionQuestion];
+      newSession.pipeline = {
+        provider: first.response.provider,
+        model: first.response.model,
+        embeddingModel: first.response.question.embeddingModel,
+        mode: "select",
+      };
+
+      await collection.updateOne(
+        { _id: result.insertedId },
+        {
+          $set: {
+            questions: newSession.questions,
+            pipeline: newSession.pipeline,
+            updatedAt: new Date(),
+          },
+        }
+      );
+    } catch (error) {
+      await collection.deleteOne({ _id: result.insertedId }).catch(() => {});
+      throw error;
+    }
 
     // Log activity
     await recordUserActivity({
       userId,
       action: "Initiated Mock Interview Session",
       category: "interview",
-      detail: `${title} (${durationMinutes} mins · ${questions.length} questions)`,
+      detail: `${title} (${durationMinutes} mins · ${plannedQuestionCount} planned questions)`,
     });
 
     return NextResponse.json({
