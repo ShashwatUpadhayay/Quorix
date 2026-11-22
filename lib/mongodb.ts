@@ -293,3 +293,67 @@ export interface MockSessionDoc {
   createdAt: Date;
   updatedAt: Date;
 }
+
+/**
+ * Expert-Hosted Quiz Question Schema
+ */
+export interface QuizQuestion {
+  id: string;
+  question: string;
+  options: string[]; // typically 4 options [A, B, C, D]
+  correctAnswer: string; // The correct option string or option letter (e.g. "A" or the exact option text)
+  explanation?: string;
+}
+
+/**
+ * Expert-Hosted Quiz Document Schema
+ */
+export interface QuizDoc {
+  _id?: string;
+  expertId: string;
+  expertName: string;
+  expertEmail?: string;
+  title: string;
+  topic: string;
+  difficulty: DifficultyTier;
+  description: string;
+  maxAttempts: number; // e.g. 1, 2, 3... 0 represents unlimited attempts
+  questions: QuizQuestion[];
+  totalQuestions: number;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+/**
+ * Candidate Quiz Attempt Document Schema
+ */
+export interface QuizAttemptDoc {
+  _id?: string;
+  quizId: string;
+  candidateId: string;
+  candidateName: string;
+  candidateEmail?: string;
+  attemptNumber: number;
+  questionOrder: string[]; // Shuffled question IDs for this attempt
+  answers: Record<string, string>; // questionId -> selectedOption
+  score: number;
+  total: number;
+  percentage: number;
+  submittedAt: Date;
+}
+
+/**
+ * Access helper for Quizzes collection
+ */
+export async function getQuizzesCollection() {
+  const db = await getDatabase();
+  return db.collection<QuizDoc>("quizzes");
+}
+
+/**
+ * Access helper for Quiz Attempts collection
+ */
+export async function getQuizAttemptsCollection() {
+  const db = await getDatabase();
+  return db.collection<QuizAttemptDoc>("quiz_attempts");
+}

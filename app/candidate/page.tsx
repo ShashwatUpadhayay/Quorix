@@ -20,6 +20,11 @@ import {
   ChevronDown,
   RotateCcw,
   Sparkles,
+  HelpCircle,
+  Shuffle,
+  FileText,
+  RefreshCw,
+  Radio,
 } from "lucide-react";
 import UserProfileView from "@/components/UserProfileView";
 import type {
@@ -37,6 +42,60 @@ interface UserProfile {
   name: string;
   email: string;
   role: string;
+}
+
+interface CandidateQuizItem {
+  _id: string;
+  expertId: string;
+  expertName: string;
+  title: string;
+  topic: string;
+  difficulty: DifficultyTier;
+  description: string;
+  maxAttempts: number;
+  totalQuestions: number;
+  createdAt: string;
+  candidateAttemptsCount: number;
+  bestScore: number | null;
+  remainingAttempts: number | null;
+  canAttempt: boolean;
+}
+
+interface ActiveQuizQuestion {
+  id: string;
+  question: string;
+  options: string[];
+}
+
+interface ActiveQuizSession {
+  _id: string;
+  title: string;
+  topic: string;
+  difficulty: DifficultyTier;
+  description: string;
+  maxAttempts: number;
+  attemptNumber: number;
+  totalQuestions: number;
+  questions: ActiveQuizQuestion[];
+}
+
+interface QuizSubmissionResult {
+  attemptId: string;
+  score: number;
+  total: number;
+  percentage: number;
+  attemptNumber: number;
+  maxAttempts: number;
+  remainingAttempts: number | null;
+  breakdown: Array<{
+    questionId: string;
+    question: string;
+    options: string[];
+    selectedAnswer: string;
+    correctAnswer: string;
+    isCorrect: boolean;
+    explanation?: string;
+  }>;
 }
 
 const DEFAULT_INTERVIEW_CONFIG: InterviewConfig = {
@@ -149,6 +208,22 @@ export default function CandidateWorkspace() {
   // Inline feedback banners
   const [boardNotice, setBoardNotice] = useState<string | null>(null);
 
+  // Boardrooms Sub-Tab: "panel" | "quizzes"
+  const [boardSubTab, setBoardSubTab] = useState<"panel" | "quizzes">("panel");
+
+  // Candidate Quizzes State
+  const [candidateQuizzes, setCandidateQuizzes] = useState<CandidateQuizItem[]>([]);
+  const [loadingCandidateQuizzes, setLoadingCandidateQuizzes] = useState(false);
+
+  // Active Quiz Runner State
+  const [activeQuizModal, setActiveQuizModal] = useState<ActiveQuizSession | null>(null);
+  const [activeQuizQuestionIdx, setActiveQuizQuestionIdx] = useState(0);
+  const [quizAnswers, setQuizAnswers] = useState<Record<string, string>>({});
+  const [quizSubmitting, setQuizSubmitting] = useState(false);
+  const [quizResult, setQuizResult] = useState<QuizSubmissionResult | null>(null);
+  const [quizRunnerError, setQuizRunnerError] = useState<string | null>(null);
+  const [startingQuizId, setStartingQuizId] = useState<string | null>(null);
+
   const hydrateFromProfile = useCallback(async () => {
     try {
       const res = await fetch("/api/profile", { cache: "no-store" });
@@ -179,6 +254,22 @@ export default function CandidateWorkspace() {
     }
   }, []);
 
+  const fetchCandidateQuizzes = useCallback(async () => {
+    try {
+      setLoadingCandidateQuizzes(true);
+      const res = await fetch("/api/quizzes", { cache: "no-store" });
+      if (!res.ok) return;
+      const data = await res.json();
+      if (Array.isArray(data.quizzes)) {
+        setCandidateQuizzes(data.quizzes);
+      }
+    } catch {
+      // Ignored
+    } finally {
+      setLoadingCandidateQuizzes(false);
+    }
+  }, []);
+
   // Authentication check + initial hydration
   useEffect(() => {
     fetch("/api/auth/me")
@@ -193,6 +284,7 @@ export default function CandidateWorkspace() {
           setUser(data.user);
           hydrateFromProfile();
           fetchPastSessions();
+          fetchCandidateQuizzes();
         }
       })
       .catch(() => {
@@ -201,7 +293,88 @@ export default function CandidateWorkspace() {
       .finally(() => {
         setLoading(false);
       });
-  }, [router, hydrateFromProfile, fetchPastSessions]);
+  }, [router, hydrateFromProfile, fetchPastSessions, fetchCandidateQuizzes]);
+
+  const handleStartQuiz = async (quizId: string) => {
+    setStartingQuizId(quizId);
+    setQuizRunnerError(null);
+    setQuizResult(null);
+    setQuizAnswers({});
+    setActiveQuizQuestionIdx(0);
+
+    try {
+      const res = await fetch(`/api/quizzes/${quizId}?take=true`, {
+        cache: "no-store",
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || "Failed to start quiz.");
+      }
+      setActiveQuizModal(data.quiz);
+      logWorkspaceActivity(
+        "Started Quiz Assessment",
+        "board",
+        `${data.quiz.title} (Attempt ${data.quiz.attemptNumber})`
+      );
+    } catch (err: unknown) {
+      setBoardNotice(
+        err instanceof Error ? err.message : "Could not launch quiz attempt."
+      );
+    } finally {
+      setStartingQuizId(null);
+    }
+  };
+
+  const handleSelectQuizOption = (questionId: string, option: string) => {
+    setQuizAnswers((prev) => ({
+      ...prev,
+      [questionId]: option,
+    }));
+  };
+
+  const handleSubmitQuiz = async () => {
+    if (!activeQuizModal) return;
+    setQuizSubmitting(true);
+    setQuizRunnerError(null);
+
+    try {
+      const res = await fetch(`/api/quizzes/${activeQuizModal._id}/submit`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          answers: quizAnswers,
+          questionOrder: activeQuizModal.questions.map((q) => q.id),
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || "Failed to submit assessment.");
+      }
+
+      setQuizResult(data);
+      fetchCandidateQuizzes();
+      logWorkspaceActivity(
+        "Completed Quiz Assessment",
+        "board",
+        `${activeQuizModal.title} — Score: ${data.score}/${data.total} (${data.percentage}%)`
+      );
+    } catch (err: unknown) {
+      setQuizRunnerError(
+        err instanceof Error ? err.message : "Error submitting quiz answers."
+      );
+    } finally {
+      setQuizSubmitting(false);
+    }
+  };
+
+  const handleCloseQuizModal = () => {
+    setActiveQuizModal(null);
+    setQuizResult(null);
+    setQuizAnswers({});
+    setActiveQuizQuestionIdx(0);
+    setQuizRunnerError(null);
+  };
 
   const practicedTopics = useMemo(() => {
     return mockSessions.flatMap((s) => [s.focus, ...(s.questions?.map((q) => q.stage) || [])]);
@@ -1013,7 +1186,7 @@ export default function CandidateWorkspace() {
             )}
 
             {/* ========================================================== */}
-            {/* FEATURE 2: LIVE BOARDROOM PANELS */}
+            {/* FEATURE 2: LIVE BOARDROOM PANELS & EXPERT QUIZZES */}
             {/* ========================================================== */}
             {activeFeature === "boards" && (
               <motion.div
@@ -1024,101 +1197,270 @@ export default function CandidateWorkspace() {
                 transition={{ duration: 0.24, ease: EASE_CURVE }}
                 className="space-y-8"
               >
-                <div className="border-b border-[#E5E2DA] pb-6 space-y-1.5">
-                  <div className="inline-flex items-center gap-2 text-xs font-mono text-[#6E6B65]">
-                    <span className="w-2 h-2 rounded-xs bg-[#1F7A55]" />
-                    <span>Multi-Expert Live Panels</span>
+                {/* Header & Sub-Tab Switcher */}
+                <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-5 border-b border-[#E5E2DA] pb-6">
+                  <div className="space-y-1.5">
+                    <div className="inline-flex items-center gap-2 text-xs font-mono text-[#6E6B65]">
+                      <span className="w-2 h-2 rounded-xs bg-[#1F7A55]" />
+                      <span>Live Multi-Expert &amp; Assessment Hub</span>
+                    </div>
+                    <h1 className="text-3xl font-bold tracking-tight text-[#1A1918]">
+                      Live Boardroom Sessions
+                    </h1>
+                    <p className="text-sm text-[#55524C] leading-relaxed max-w-prose">
+                      Connect with scheduled multi-expert evaluation panels, or complete expert-curated assessments with dynamically jumbled question sequences.
+                    </p>
                   </div>
-                  <h1 className="text-3xl font-bold tracking-tight text-[#1A1918]">
-                    Live Boardroom Sessions
-                  </h1>
-                  <p className="text-sm text-[#55524C] leading-relaxed max-w-prose">
-                    Join scheduled live interviews matched to your profile&apos;s domain topics and difficulty tier with real-time AI co-pilot assistance.
-                  </p>
+
+                  {/* Sub-Tab Navigation */}
+                  <div className="inline-flex rounded-lg border border-[#E5E2DA] bg-[#F2EFE9] p-1 gap-1 shrink-0">
+                    <button
+                      onClick={() => setBoardSubTab("panel")}
+                      className={`inline-flex items-center gap-2 px-3.5 py-2 rounded-md text-xs font-medium transition-all ${
+                        boardSubTab === "panel"
+                          ? "bg-[#FFFFFF] text-[#1A1918] font-semibold shadow-xs"
+                          : "text-[#6E6B65] hover:text-[#1A1918]"
+                      }`}
+                    >
+                      <Radio className="w-3.5 h-3.5 text-[#1F7A55]" />
+                      <span>Live Panel</span>
+                    </button>
+                    <button
+                      onClick={() => setBoardSubTab("quizzes")}
+                      className={`inline-flex items-center gap-2 px-3.5 py-2 rounded-md text-xs font-medium transition-all ${
+                        boardSubTab === "quizzes"
+                          ? "bg-[#FFFFFF] text-[#1A1918] font-semibold shadow-xs"
+                          : "text-[#6E6B65] hover:text-[#1A1918]"
+                      }`}
+                    >
+                      <HelpCircle className="w-3.5 h-3.5 text-[#1A1918]" />
+                      <span>Expert Quizzes ({candidateQuizzes.length})</span>
+                    </button>
+                  </div>
                 </div>
 
-                {/* Double-Bezel Scheduled Boardroom Card */}
-                <div className="rounded-xl border border-[#E5E2DA] bg-[#F2EFE9] p-1.5">
-                  <div className="rounded-lg border border-[#E5E2DA] bg-[#FFFFFF] p-6 space-y-6 shadow-[0_1px_2px_rgba(26,25,24,0.03)]">
-                    <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
-                      <div className="space-y-1">
-                        <div className="text-[11px] font-mono text-[#6E6B65]">
-                          BOARD #BRD-9021 · PROFILE-MATCHED
+                {/* SUB-VIEW 1: SCHEDULED LIVE PANEL */}
+                {boardSubTab === "panel" && (
+                  <div className="rounded-xl border border-[#E5E2DA] bg-[#F2EFE9] p-1.5">
+                    <div className="rounded-lg border border-[#E5E2DA] bg-[#FFFFFF] p-6 space-y-6 shadow-[0_1px_2px_rgba(26,25,24,0.03)]">
+                      <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
+                        <div className="space-y-1">
+                          <div className="text-[11px] font-mono text-[#6E6B65]">
+                            BOARD #BRD-9021 · PROFILE-MATCHED
+                          </div>
+                          <h2 className="text-lg font-bold text-[#1A1918]">
+                            {interviewConfig.difficultyTier}{" "}
+                            {interviewConfig.primaryTopics[0]} Board
+                          </h2>
                         </div>
-                        <h2 className="text-lg font-bold text-[#1A1918]">
-                          {interviewConfig.difficultyTier}{" "}
-                          {interviewConfig.primaryTopics[0]} Board
-                        </h2>
+                        <span className="inline-flex items-center gap-1.5 rounded-md border border-[#CBE4D6] bg-[#EDF3EC] px-3 py-1 text-[11px] font-mono text-[#1F7A55] font-semibold w-fit">
+                          <Clock className="w-3 h-3" strokeWidth={2} />
+                          <span>TODAY · 4:00 PM</span>
+                        </span>
                       </div>
-                      <span className="inline-flex items-center gap-1.5 rounded-md border border-[#CBE4D6] bg-[#EDF3EC] px-3 py-1 text-[11px] font-mono text-[#1F7A55] font-semibold w-fit">
-                        <Clock className="w-3 h-3" strokeWidth={2} />
-                        <span>TODAY · 4:00 PM</span>
-                      </span>
-                    </div>
 
-                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                      {[
-                        { label: "Panel Size", value: "2 Experts" },
-                        { label: "Duration", value: "45 Min" },
-                        {
-                          label: "Calibration",
-                          value: `Tier ${interviewConfig.difficultyNumeric} (${interviewConfig.difficultyTier})`,
-                        },
-                        { label: "Room Status", value: "Ready To Connect" },
-                      ].map((meta) => (
-                        <div
-                          key={meta.label}
-                          className="rounded-lg border border-[#E5E2DA] bg-[#FAF8F5] p-3"
-                        >
-                          <div className="text-[10px] font-mono text-[#8E8B84] uppercase">
-                            {meta.label}
-                          </div>
-                          <div className="text-xs font-semibold text-[#1A1918] mt-1">
-                            {meta.value}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-
-                    <div className="pt-4 border-t border-[#E5E2DA] flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                      <div className="flex flex-wrap items-center gap-1.5 text-xs text-[#55524C]">
-                        <span className="mr-1">Focus areas:</span>
-                        {interviewConfig.focusAreas.slice(0, 4).map((area) => (
-                          <span
-                            key={area}
-                            className="rounded-md border border-[#E5E2DA] bg-[#FAF8F5] px-2 py-0.5 font-mono text-[11px] text-[#1A1918]"
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                        {[
+                          { label: "Panel Size", value: "2 Experts" },
+                          { label: "Duration", value: "45 Min" },
+                          {
+                            label: "Calibration",
+                            value: `Tier ${interviewConfig.difficultyNumeric} (${interviewConfig.difficultyTier})`,
+                          },
+                          { label: "Room Status", value: "Ready To Connect" },
+                        ].map((meta) => (
+                          <div
+                            key={meta.label}
+                            className="rounded-lg border border-[#E5E2DA] bg-[#FAF8F5] p-3"
                           >
-                            {area}
-                          </span>
+                            <div className="text-[10px] font-mono text-[#8E8B84] uppercase">
+                              {meta.label}
+                            </div>
+                            <div className="text-xs font-semibold text-[#1A1918] mt-1">
+                              {meta.value}
+                            </div>
+                          </div>
                         ))}
                       </div>
 
+                      <div className="pt-4 border-t border-[#E5E2DA] flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                        <div className="flex flex-wrap items-center gap-1.5 text-xs text-[#55524C]">
+                          <span className="mr-1">Focus areas:</span>
+                          {interviewConfig.focusAreas.slice(0, 4).map((area) => (
+                            <span
+                              key={area}
+                              className="rounded-md border border-[#E5E2DA] bg-[#FAF8F5] px-2 py-0.5 font-mono text-[11px] text-[#1A1918]"
+                            >
+                              {area}
+                            </span>
+                          ))}
+                        </div>
+
+                        <button
+                          onClick={() => {
+                            logWorkspaceActivity(
+                              "Joined Live Boardroom",
+                              "board",
+                              `Board #BRD-9021 — ${interviewConfig.recommendedTrack}`
+                            );
+                            setBoardNotice(
+                              "Room #BRD-9021 handshake queued. Your calibrated dossier has been shared with the panel."
+                            );
+                          }}
+                          className="group inline-flex items-center justify-center gap-2 rounded-lg text-xs font-medium bg-[#1A1918] text-[#FAF8F5] pl-4 pr-2.5 py-2.5 hover:bg-[#2C2A28] active:scale-[0.98] transition-all shrink-0 focus-visible:outline-2 focus-visible:outline-[#1A1918]"
+                        >
+                          <span>Connect To Boardroom</span>
+                          <ArrowRight className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+
+                      {boardNotice && (
+                        <div className="flex items-center gap-2 rounded-lg border border-[#CBE4D6] bg-[#EDF3EC] px-3.5 py-2.5 text-xs text-[#1F7A55]">
+                          <CheckCircle2 className="w-4 h-4 shrink-0" />
+                          <span>{boardNotice}</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* SUB-VIEW 2: EXPERT-HOSTED QUIZZES */}
+                {boardSubTab === "quizzes" && (
+                  <div className="space-y-6">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <h2 className="text-xl font-bold text-[#1A1918]">
+                          Available Assessments
+                        </h2>
+                        <p className="text-xs text-[#6E6B65]">
+                          Test your depth across curated topic modules. Each attempt presents questions in a unique randomized sequence.
+                        </p>
+                      </div>
+
                       <button
-                        onClick={() => {
-                          logWorkspaceActivity(
-                            "Joined Live Boardroom",
-                            "board",
-                            `Board #BRD-9021 — ${interviewConfig.recommendedTrack}`
-                          );
-                          setBoardNotice(
-                            "Room #BRD-9021 handshake queued. Your calibrated dossier has been shared with the panel."
-                          );
-                        }}
-                        className="group inline-flex items-center justify-center gap-2 rounded-lg text-xs font-medium bg-[#1A1918] text-[#FAF8F5] pl-4 pr-2.5 py-2.5 hover:bg-[#2C2A28] active:scale-[0.98] transition-all shrink-0 focus-visible:outline-2 focus-visible:outline-[#1A1918]"
+                        onClick={fetchCandidateQuizzes}
+                        disabled={loadingCandidateQuizzes}
+                        className="p-2 rounded-lg border border-[#E5E2DA] bg-[#FFFFFF] text-[#6E6B65] hover:text-[#1A1918] hover:bg-[#F2EFE9] transition-all"
+                        title="Refresh Available Quizzes"
                       >
-                        <span>Connect To Boardroom</span>
-                        <ArrowRight className="w-3.5 h-3.5" />
+                        <RefreshCw className={`w-4 h-4 ${loadingCandidateQuizzes ? "animate-spin" : ""}`} />
                       </button>
                     </div>
 
-                    {boardNotice && (
-                      <div className="flex items-center gap-2 rounded-lg border border-[#CBE4D6] bg-[#EDF3EC] px-3.5 py-2.5 text-xs text-[#1F7A55]">
-                        <CheckCircle2 className="w-4 h-4 shrink-0" />
-                        <span>{boardNotice}</span>
+                    {loadingCandidateQuizzes ? (
+                      <div className="rounded-xl border border-[#E5E2DA] bg-[#FFFFFF] p-8 text-center text-xs font-mono text-[#6E6B65]">
+                        <RefreshCw className="w-4 h-4 animate-spin mx-auto mb-2 text-[#1A1918]" />
+                        Loading quizzes...
+                      </div>
+                    ) : candidateQuizzes.length === 0 ? (
+                      <div className="rounded-xl border border-[#E5E2DA] bg-[#F2EFE9] p-1.5">
+                        <div className="rounded-lg border border-[#E5E2DA] bg-[#FFFFFF] p-10 text-center space-y-3">
+                          <FileText className="w-8 h-8 text-[#8E8B84] mx-auto" />
+                          <h3 className="text-sm font-bold text-[#1A1918]">
+                            No Quizzes Currently Active
+                          </h3>
+                          <p className="text-xs text-[#6E6B65] max-w-sm mx-auto">
+                            Board experts have not published assessments for this track yet. Check back soon or practice in the Solo AI Mock Interview.
+                          </p>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        {candidateQuizzes.map((q) => (
+                          <div
+                            key={q._id}
+                            className="rounded-xl border border-[#E5E2DA] bg-[#F2EFE9] p-1.5 transition-all hover:border-[#D5D1C7]"
+                          >
+                            <div className="rounded-lg border border-[#E5E2DA] bg-[#FFFFFF] p-5 space-y-4 shadow-[0_1px_2px_rgba(26,25,24,0.03)] h-full flex flex-col justify-between">
+                              <div className="space-y-3">
+                                <div className="flex items-center justify-between gap-2">
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-[10px] font-mono border border-[#E5E2DA] bg-[#FAF8F5] px-2 py-0.5 rounded-sm text-[#1A1918] uppercase">
+                                      {q.topic}
+                                    </span>
+                                    <span className="text-[10px] font-mono bg-[#1A1918] text-[#FAF8F5] px-2 py-0.5 rounded-sm">
+                                      {q.difficulty}
+                                    </span>
+                                  </div>
+
+                                  {q.bestScore !== null && (
+                                    <span className="text-[11px] font-mono font-bold text-[#1F7A55] rounded-md border border-[#CBE4D6] bg-[#EDF3EC] px-2.5 py-0.5">
+                                      Best: {q.bestScore}%
+                                    </span>
+                                  )}
+                                </div>
+
+                                <div className="space-y-1">
+                                  <h3 className="text-base font-bold text-[#1A1918] leading-tight">
+                                    {q.title}
+                                  </h3>
+                                  <p className="text-xs text-[#55524C] line-clamp-2">
+                                    {q.description}
+                                  </p>
+                                </div>
+                              </div>
+
+                              <div className="pt-3 border-t border-[#E5E2DA] space-y-3">
+                                <div className="grid grid-cols-3 gap-2 text-center text-xs font-mono">
+                                  <div className="rounded-md border border-[#E5E2DA] bg-[#FAF8F5] p-2">
+                                    <div className="text-[10px] text-[#8E8B84] uppercase">Questions</div>
+                                    <div className="font-bold text-[#1A1918] mt-0.5">{q.totalQuestions}</div>
+                                  </div>
+
+                                  <div className="rounded-md border border-[#E5E2DA] bg-[#FAF8F5] p-2">
+                                    <div className="text-[10px] text-[#8E8B84] uppercase">Max Attempts</div>
+                                    <div className="font-bold text-[#1A1918] mt-0.5">
+                                      {q.maxAttempts === 0 ? "Unlimited" : `${q.maxAttempts}×`}
+                                    </div>
+                                  </div>
+
+                                  <div className="rounded-md border border-[#E5E2DA] bg-[#FAF8F5] p-2">
+                                    <div className="text-[10px] text-[#8E8B84] uppercase">Used Attempts</div>
+                                    <div className="font-bold text-[#1A1918] mt-0.5">
+                                      {q.candidateAttemptsCount}
+                                      {q.maxAttempts > 0 && `/${q.maxAttempts}`}
+                                    </div>
+                                  </div>
+                                </div>
+
+                                <div className="flex items-center justify-between gap-3 pt-1">
+                                  <div className="text-[11px] font-mono text-[#6E6B65] flex items-center gap-1">
+                                    <Shuffle className="w-3 h-3 text-[#1F7A55]" />
+                                    <span>Jumbled Order</span>
+                                  </div>
+
+                                  <button
+                                    onClick={() => handleStartQuiz(q._id)}
+                                    disabled={!q.canAttempt || startingQuizId === q._id}
+                                    className={`inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-semibold transition-all shadow-xs ${
+                                      q.canAttempt
+                                        ? "bg-[#1A1918] text-[#FAF8F5] hover:bg-[#2C2A28] active:scale-[0.98]"
+                                        : "bg-[#F2EFE9] text-[#8E8B84] border border-[#E5E2DA] cursor-not-allowed"
+                                    }`}
+                                  >
+                                    {startingQuizId === q._id ? (
+                                      <>
+                                        <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                                        <span>Preparing...</span>
+                                      </>
+                                    ) : q.canAttempt ? (
+                                      <>
+                                        <span>{q.candidateAttemptsCount > 0 ? "Retake Quiz" : "Take Quiz"}</span>
+                                        <ArrowRight className="w-3.5 h-3.5" />
+                                      </>
+                                    ) : (
+                                      <span>Attempts Exhausted</span>
+                                    )}
+                                  </button>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
                       </div>
                     )}
                   </div>
-                </div>
+                )}
               </motion.div>
             )}
 
@@ -1442,6 +1784,305 @@ export default function CandidateWorkspace() {
                       </div>
                     </div>
                   )
+                )}
+              </div>
+            </motion.div>
+          </div>
+        )}
+
+        {/* ============================================================ */}
+        {/* MODAL: INTERACTIVE EXPERT QUIZ RUNNER & SCORER */}
+        {/* ============================================================ */}
+        {activeQuizModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#1A1918]/45 backdrop-blur-xs overflow-y-auto">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.96 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.96 }}
+              transition={{ duration: 0.2, ease: EASE_CURVE }}
+              className="w-full max-w-3xl my-8 rounded-xl border border-[#E5E2DA] bg-[#F2EFE9] p-1.5 shadow-2xl"
+            >
+              <div className="rounded-lg border border-[#E5E2DA] bg-[#FFFFFF] p-6 sm:p-8 space-y-6 max-h-[88vh] overflow-y-auto">
+                {/* ── STATE A: QUIZ RUNNER (In Progress) ── */}
+                {!quizResult ? (
+                  <>
+                    {/* Header */}
+                    <div className="flex items-start justify-between border-b border-[#E5E2DA] pb-4">
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-2">
+                          <span className="text-[10px] font-mono border border-[#E5E2DA] bg-[#FAF8F5] px-2 py-0.5 rounded-sm text-[#1A1918] uppercase">
+                            {activeQuizModal.topic}
+                          </span>
+                          <span className="text-[10px] font-mono bg-[#1A1918] text-[#FAF8F5] px-2 py-0.5 rounded-sm">
+                            Attempt #{activeQuizModal.attemptNumber}
+                            {activeQuizModal.maxAttempts > 0 && ` of ${activeQuizModal.maxAttempts}`}
+                          </span>
+                        </div>
+                        <h2 className="text-xl font-bold text-[#1A1918]">
+                          {activeQuizModal.title}
+                        </h2>
+                      </div>
+
+                      <button
+                        onClick={handleCloseQuizModal}
+                        className="p-1.5 rounded-md text-[#8E8B84] hover:text-[#1A1918] hover:bg-[#FAF8F5] transition-colors"
+                        title="Exit Quiz"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    </div>
+
+                    {/* Telemetry Strip: Jumbled notice + Progress */}
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between text-xs font-mono text-[#6E6B65]">
+                        <span className="flex items-center gap-1.5 text-[#1F7A55] font-semibold">
+                          <Shuffle className="w-3.5 h-3.5" />
+                          <span>Jumbled Question Order (Randomized)</span>
+                        </span>
+                        <span>
+                          Question {activeQuizQuestionIdx + 1} of {activeQuizModal.totalQuestions}
+                        </span>
+                      </div>
+
+                      {/* Progress Bar */}
+                      <div className="h-1.5 w-full bg-[#E5E2DA] rounded-full overflow-hidden">
+                        <div
+                          style={{
+                            width: `${
+                              ((activeQuizQuestionIdx + 1) /
+                                activeQuizModal.totalQuestions) *
+                              100
+                            }%`,
+                          }}
+                          className="h-full bg-[#1A1918] transition-all duration-300"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Question Card */}
+                    {activeQuizModal.questions[activeQuizQuestionIdx] && (
+                      <div className="space-y-5 py-2">
+                        <div className="text-base sm:text-lg font-bold text-[#1A1918] leading-snug">
+                          {activeQuizModal.questions[activeQuizQuestionIdx].question}
+                        </div>
+
+                        {/* Options List */}
+                        <div className="space-y-2.5">
+                          {activeQuizModal.questions[activeQuizQuestionIdx].options.map(
+                            (option, optIdx) => {
+                              const currentQId =
+                                activeQuizModal.questions[activeQuizQuestionIdx].id;
+                              const isSelected =
+                                quizAnswers[currentQId] === option;
+                              const letter = String.fromCharCode(65 + optIdx);
+
+                              return (
+                                <button
+                                  type="button"
+                                  key={optIdx}
+                                  onClick={() =>
+                                    handleSelectQuizOption(currentQId, option)
+                                  }
+                                  className={`w-full flex items-start gap-3.5 p-4 rounded-lg border text-left text-xs transition-all ${
+                                    isSelected
+                                      ? "border-[#1A1918] bg-[#FAF8F5] shadow-xs"
+                                      : "border-[#E5E2DA] bg-[#FFFFFF] hover:border-[#D5D1C7] hover:bg-[#FAF8F5]/50"
+                                  }`}
+                                >
+                                  <span
+                                    className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold font-mono shrink-0 transition-colors ${
+                                      isSelected
+                                        ? "bg-[#1A1918] text-[#FAF8F5]"
+                                        : "border border-[#D5D1C7] bg-[#FFFFFF] text-[#6E6B65]"
+                                    }`}
+                                  >
+                                    {letter}
+                                  </span>
+                                  <span
+                                    className={`leading-relaxed text-sm ${
+                                      isSelected
+                                        ? "font-semibold text-[#1A1918]"
+                                        : "text-[#33312E]"
+                                    }`}
+                                  >
+                                    {option}
+                                  </span>
+                                </button>
+                              );
+                            }
+                          )}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Error Notice */}
+                    {quizRunnerError && (
+                      <div className="p-3 rounded-lg border border-[#FCA5A5] bg-[#FEF2F2] text-xs font-mono text-[#991B1B]">
+                        {quizRunnerError}
+                      </div>
+                    )}
+
+                    {/* Footer Nav Controls */}
+                    <div className="flex items-center justify-between pt-4 border-t border-[#E5E2DA]">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setActiveQuizQuestionIdx((prev) => Math.max(0, prev - 1))
+                        }
+                        disabled={activeQuizQuestionIdx === 0}
+                        className="px-4 py-2 rounded-lg border border-[#E5E2DA] text-xs font-medium text-[#6E6B65] hover:text-[#1A1918] hover:bg-[#FAF8F5] disabled:opacity-40 disabled:cursor-not-allowed transition-all"
+                      >
+                        Previous Question
+                      </button>
+
+                      {activeQuizQuestionIdx < activeQuizModal.totalQuestions - 1 ? (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setActiveQuizQuestionIdx((prev) =>
+                              Math.min(activeQuizModal.totalQuestions - 1, prev + 1)
+                            )
+                          }
+                          className="inline-flex items-center gap-1.5 px-5 py-2.5 rounded-lg bg-[#1A1918] text-[#FAF8F5] text-xs font-semibold hover:bg-[#2C2A28] transition-all"
+                        >
+                          <span>Next Question</span>
+                          <ArrowRight className="w-3.5 h-3.5" />
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={handleSubmitQuiz}
+                          disabled={quizSubmitting}
+                          className="inline-flex items-center gap-1.5 px-6 py-2.5 rounded-lg bg-[#1F7A55] text-white text-xs font-semibold hover:bg-[#186043] disabled:opacity-50 transition-all shadow-xs"
+                        >
+                          {quizSubmitting ? (
+                            <>
+                              <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                              <span>Evaluating Answers...</span>
+                            </>
+                          ) : (
+                            <>
+                              <CheckCircle2 className="w-3.5 h-3.5" />
+                              <span>Submit &amp; Score Assessment</span>
+                            </>
+                          )}
+                        </button>
+                      )}
+                    </div>
+                  </>
+                ) : (
+                  /* ── STATE B: EVALUATION RESULTS & BREAKDOWN ── */
+                  <div className="space-y-6">
+                    {/* Header */}
+                    <div className="flex items-start justify-between border-b border-[#E5E2DA] pb-4">
+                      <div>
+                        <div className="inline-flex items-center gap-1.5 text-xs font-mono text-[#1F7A55]">
+                          <CheckCircle2 className="w-4 h-4" />
+                          <span>Assessment Complete</span>
+                        </div>
+                        <h2 className="text-2xl font-bold text-[#1A1918] mt-1">
+                          Performance Report: {activeQuizModal.title}
+                        </h2>
+                      </div>
+
+                      <button
+                        onClick={handleCloseQuizModal}
+                        className="p-1.5 rounded-md text-[#8E8B84] hover:text-[#1A1918] hover:bg-[#FAF8F5] transition-colors"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    </div>
+
+                    {/* Double-Bezel Score Card */}
+                    <div className="rounded-xl border border-[#E5E2DA] bg-[#F2EFE9] p-1.5">
+                      <div className="rounded-lg border border-[#E5E2DA] bg-[#FFFFFF] p-6 text-center space-y-2 shadow-[0_1px_2px_rgba(26,25,24,0.03)]">
+                        <div className="text-[11px] font-mono text-[#6E6B65] uppercase">
+                          Final Accuracy Score
+                        </div>
+                        <div className="text-4xl font-extrabold font-mono text-[#1A1918]">
+                          {quizResult.percentage}%
+                        </div>
+                        <div className="text-xs font-mono text-[#1F7A55] font-semibold">
+                          {quizResult.score} of {quizResult.total} Questions Answered Correctly
+                        </div>
+                        <div className="text-[11px] text-[#6E6B65] pt-2 border-t border-[#E5E2DA]">
+                          Attempt #{quizResult.attemptNumber}
+                          {quizResult.maxAttempts > 0
+                            ? ` • ${quizResult.remainingAttempts} of ${quizResult.maxAttempts} attempts remaining`
+                            : " • Unlimited attempts allowed by expert"}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Question Breakdown Review */}
+                    <div className="space-y-3">
+                      <div className="text-xs font-mono text-[#6E6B65] uppercase">
+                        Question Review &amp; Explanations
+                      </div>
+
+                      <div className="space-y-3 max-h-72 overflow-y-auto pr-1">
+                        {quizResult.breakdown.map((item, idx) => (
+                          <div
+                            key={idx}
+                            className={`p-4 rounded-lg border text-xs space-y-2 ${
+                              item.isCorrect
+                                ? "border-[#CBE4D6] bg-[#F0FDF4]/60"
+                                : "border-[#FCA5A5] bg-[#FEF2F2]/60"
+                            }`}
+                          >
+                            <div className="flex items-start justify-between gap-2">
+                              <span className="font-bold text-[#1A1918]">
+                                Q{idx + 1}. {item.question}
+                              </span>
+                              <span
+                                className={`shrink-0 font-mono text-[10px] px-2 py-0.5 rounded-sm font-bold ${
+                                  item.isCorrect
+                                    ? "bg-[#CBE4D6] text-[#1F7A55]"
+                                    : "bg-[#FCA5A5] text-[#991B1B]"
+                                }`}
+                              >
+                                {item.isCorrect ? "✓ CORRECT" : "✗ INCORRECT"}
+                              </span>
+                            </div>
+
+                            <div className="text-[11px] font-mono space-y-1 pt-1">
+                              <div>
+                                <span className="text-[#6E6B65]">Your Answer: </span>
+                                <span className={item.isCorrect ? "text-[#1F7A55] font-semibold" : "text-[#991B1B] font-semibold"}>
+                                  {item.selectedAnswer || "(No answer selected)"}
+                                </span>
+                              </div>
+                              {!item.isCorrect && (
+                                <div>
+                                  <span className="text-[#6E6B65]">Correct Answer: </span>
+                                  <span className="text-[#1F7A55] font-semibold">
+                                    {item.correctAnswer}
+                                  </span>
+                                </div>
+                              )}
+                            </div>
+
+                            {item.explanation && (
+                              <div className="text-[11px] text-[#55524C] pt-2 border-t border-[#E5E2DA] leading-relaxed">
+                                <span className="font-semibold text-[#1A1918]">Explanation: </span>
+                                {item.explanation}
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Results Footer */}
+                    <div className="flex justify-end pt-4 border-t border-[#E5E2DA]">
+                      <button
+                        onClick={handleCloseQuizModal}
+                        className="px-5 py-2.5 rounded-lg bg-[#1A1918] text-[#FAF8F5] text-xs font-semibold hover:bg-[#2C2A28] transition-all shadow-xs"
+                      >
+                        Return to Boardroom
+                      </button>
+                    </div>
+                  </div>
                 )}
               </div>
             </motion.div>
