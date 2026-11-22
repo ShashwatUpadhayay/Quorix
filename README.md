@@ -32,8 +32,11 @@ Set these server-side variables on the hosting platform:
 ```env
 LLM_PROVIDER=gemini
 GEMINI_API_KEY=<your-server-side-key>
-GEMINI_MODEL=gemini-2.5-flash
+GEMINI_MODEL=gemini-3.8-flash
 GEMINI_API_BASE_URL=https://generativelanguage.googleapis.com/v1beta
+GEMINI_MAX_RETRIES=4
+GEMINI_RETRY_BASE_MS=1000
+GEMINI_TIMEOUT_MS=120000
 ```
 
 Never prefix the Gemini key with `NEXT_PUBLIC_`. Production session creation uses
