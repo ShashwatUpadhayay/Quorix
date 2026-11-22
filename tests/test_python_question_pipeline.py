@@ -13,6 +13,24 @@ from python_pipeline.pipeline import (
 
 
 class QuestionPipelineTests(unittest.TestCase):
+    def test_coding_requests_include_dsa_editor_metadata_in_fallback(self) -> None:
+        pipeline = QuestionPipeline(OllamaClient(base_url="http://127.0.0.1:1"))
+        result = pipeline.run(
+            QuestionRequest(
+                session_id="test-coding",
+                interview_type="coding",
+                focus="Arrays",
+                profile=Profile(level="Intermediate", primary_topics=["Arrays"]),
+                mode="select",
+                stage="icebreaker",
+            )
+        )
+
+        question = result["question"]
+        self.assertIn("codeStarter", question)
+        self.assertIn("constraints", question)
+        self.assertIn("examples", question)
+
     def test_difficulty_tracks_level_and_progress(self) -> None:
         foundational = Profile(level="Foundational")
         self.assertEqual(target_difficulty(foundational, "technical", 1, 5), 1)

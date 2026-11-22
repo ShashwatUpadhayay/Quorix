@@ -12,6 +12,8 @@ import {
   RotateCcw,
   Sparkles,
   ChevronRight,
+  Play,
+  Terminal,
 } from "lucide-react";
 import type { MockSessionDoc, MockSessionResponse } from "@/lib/mongodb";
 
@@ -44,6 +46,8 @@ export default function MockInterviewRoom({ params }: PageProps) {
   const [userAnswer, setUserAnswer] = useState("");
   const [codeSubmitted, setCodeSubmitted] = useState("");
   const [selectedLanguage, setSelectedLanguage] = useState("TypeScript");
+  const [terminalOutput, setTerminalOutput] = useState("");
+  const [isRunningCode, setIsRunningCode] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [latestEvaluation, setLatestEvaluation] = useState<{
     scores: {
@@ -147,6 +151,58 @@ export default function MockInterviewRoom({ params }: PageProps) {
     } else {
       setCodeSubmitted("");
     }
+    setTerminalOutput("");
+  };
+
+  const handleRunCode = async () => {
+    if (!codeSubmitted.trim()) {
+      setTerminalOutput("No code to run.");
+      return;
+    }
+    if (!["JavaScript", "TypeScript"].includes(selectedLanguage)) {
+      setTerminalOutput(
+        `${selectedLanguage} execution requires a server-side judge and is not available in this local browser terminal yet.`
+      );
+      return;
+    }
+
+    setIsRunningCode(true);
+    setTerminalOutput("");
+    const logs: string[] = [];
+    try {
+      const jsCode =
+        selectedLanguage === "TypeScript"
+          ? codeSubmitted
+              .replace(/:\s*[A-Za-z_$][\w<>\[\]|.?]*(?=[=;,)\n])/g, "")
+              .replace(/\b(?:interface|type)\s+\w+[^{}]*\{[^}]*\}/g, "")
+          : codeSubmitted;
+      const runner = Object.getPrototypeOf(async function () {}).constructor;
+      const execute = runner(
+        "console",
+        `${jsCode}\n; return typeof solution === "function" ? "solution() defined" : "Execution completed";`
+      );
+      const result = await execute({
+        log: (...args: unknown[]) =>
+          logs.push(args.map((value) => String(value)).join(" ")),
+        error: (...args: unknown[]) =>
+          logs.push(`Error: ${args.map((value) => String(value)).join(" ")}`),
+        warn: (...args: unknown[]) =>
+          logs.push(`Warning: ${args.map((value) => String(value)).join(" ")}`),
+      });
+      setTerminalOutput(
+        [...logs, typeof result === "string" ? result : "Execution completed"].join(
+          "\n"
+        )
+      );
+    } catch (runError) {
+      setTerminalOutput(
+        `Runtime error: ${
+          runError instanceof Error ? runError.message : String(runError)
+        }`
+      );
+    } finally {
+      setIsRunningCode(false);
+    }
   };
 
   const handleSubmitResponse = async (e?: React.FormEvent) => {
@@ -182,6 +238,7 @@ export default function MockInterviewRoom({ params }: PageProps) {
 
       // Reset input fields for the next question
       setUserAnswer("");
+      setTerminalOutput("");
       const nextQ =
         freshData.session?.questions?.[
           freshData.session.currentQuestionIndex || 0
@@ -551,6 +608,29 @@ export default function MockInterviewRoom({ params }: PageProps) {
                         className="w-full rounded-lg border border-[#D5D1C7] bg-[#1A1918] text-[#FAF8F5] p-4 text-xs font-mono leading-relaxed focus-visible:outline-2 focus-visible:outline-[#1F7A55]"
                         spellCheck={false}
                       />
+                      <div className="overflow-hidden rounded-lg border border-[#D5D1C7] bg-[#11110F]">
+                        <div className="flex items-center justify-between border-b border-[#34332F] px-3 py-2">
+                          <div className="flex items-center gap-2 text-[10px] font-mono uppercase text-[#B7B3A9]">
+                            <Terminal className="h-3.5 w-3.5" />
+                            <span>Local Terminal</span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={handleRunCode}
+                            disabled={isRunningCode || !codeSubmitted.trim()}
+                            className="inline-flex items-center gap-1.5 rounded border border-[#4A4944] bg-[#24241F] px-2.5 py-1 text-[10px] font-mono text-[#FAF8F5] hover:bg-[#34332F] disabled:opacity-45"
+                          >
+                            <Play className="h-3 w-3" />
+                            {isRunningCode ? "Running..." : "Run"}
+                          </button>
+                        </div>
+                        <pre
+                          className="min-h-20 max-h-40 overflow-auto whitespace-pre-wrap px-3 py-3 text-[11px] leading-relaxed text-[#D9D5CB] font-mono"
+                          aria-live="polite"
+                        >
+                          {terminalOutput || "$ Ready"}
+                        </pre>
+                      </div>
                     </div>
                   )}
 

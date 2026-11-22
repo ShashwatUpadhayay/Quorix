@@ -15,6 +15,9 @@ interface PythonQuestionResponse {
     stage: MockSessionQuestion["stage"];
     expected_points: string[];
     competency_tags: string[];
+    codeStarter?: string;
+    constraints?: string[];
+    examples?: Array<{ input: string; output: string; explanation?: string }>;
     status: string;
     source: "curated" | "seeded" | "generated" | "fallback";
   };
@@ -160,6 +163,26 @@ export function generateFallbackSessionQuestions(params: {
       topic: params.focus,
       subtopic: params.focus,
       difficulty,
+      ...(params.interviewType === "coding"
+        ? {
+            codeStarter:
+              "function solution(input) {\n" +
+              "  // Implement your solution here\n" +
+              "}\n",
+            constraints: [
+              "Handle empty and boundary inputs",
+              "Optimize for the stated problem size",
+              "Explain time and space complexity",
+            ],
+            examples: [
+              {
+                input: "input = sample input",
+                output: "expected output",
+                explanation: "Validate the solution against the stated constraints.",
+              },
+            ],
+          }
+        : {}),
       expectedPoints: [
         "Concrete reasoning",
         "Trade-offs",
@@ -255,6 +278,7 @@ Requirements:
 - Use 1-3 self-contained sentences grounded in a realistic engineering scenario.
 - Match the stage and difficulty exactly.
 - Provide 2-5 expectedPoints and 1-6 competencyTags.
+- If interview type is coding, generate a genuine DSA problem with a function starter, constraints, and sample test cases.
 - Return a JSON object containing only one "questions" array.`;
 
   const questionSchema = {
@@ -286,6 +310,23 @@ Requirements:
               items: { type: "string" },
               minItems: 1,
               maxItems: 10,
+            },
+            codeStarter: { type: "string" },
+            constraints: {
+              type: "array",
+              items: { type: "string" },
+            },
+            examples: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  input: { type: "string" },
+                  output: { type: "string" },
+                  explanation: { type: "string" },
+                },
+                required: ["input", "output"],
+              },
             },
           },
           required: [
@@ -358,6 +399,9 @@ Requirements:
       stage: PythonQuestionResponse["question"]["stage"];
       expectedPoints: string[];
       competencyTags: string[];
+      codeStarter?: string;
+      constraints?: string[];
+      examples?: Array<{ input: string; output: string; explanation?: string }>;
     }>;
   };
   if (!Array.isArray(parsed.questions) || parsed.questions.length !== params.count) {
@@ -380,6 +424,32 @@ Requirements:
         competency_tags: question.competencyTags,
         status: "draft",
         source: "generated",
+        codeStarter:
+          params.interviewType === "coding"
+            ? question.codeStarter ||
+              "function solution(input) {\n" +
+                "  // Implement your solution here\n" +
+                "}\n"
+            : undefined,
+        constraints:
+          params.interviewType === "coding"
+            ? question.constraints || [
+                "Handle empty and boundary inputs",
+                "Optimize for the stated problem size",
+                "Explain time and space complexity",
+              ]
+            : undefined,
+        examples:
+          params.interviewType === "coding"
+            ? question.examples || [
+                {
+                  input: "input = sample input",
+                  output: "expected output",
+                  explanation:
+                    "Validate the solution against the stated constraints.",
+                },
+              ]
+            : undefined,
       },
       source: "generated",
       accepted: true,
@@ -411,6 +481,9 @@ function toSessionQuestion(
     difficulty: question.difficulty,
     expectedPoints: question.expected_points,
     competencyTags: question.competency_tags,
+    codeStarter: question.codeStarter,
+    constraints: question.constraints,
+    examples: question.examples,
     expectedSignals: question.expected_points,
     source: response.source,
     generationMeta: {
