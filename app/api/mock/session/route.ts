@@ -3,7 +3,10 @@ import { getCurrentUser } from "@/lib/auth";
 import { getDatabase, MockSessionDoc, DifficultyTier, InterviewType } from "@/lib/mongodb";
 import { recordUserActivity } from "@/lib/activity";
 import { getQuestionCountForDuration } from "@/lib/mockInterviewEngine";
-import { generateSessionQuestions } from "@/lib/pythonQuestionPipeline";
+import {
+  generateFallbackSessionQuestions,
+  generateSessionQuestions,
+} from "@/lib/pythonQuestionPipeline";
 
 const TIER_NUMERIC_MAP: Record<DifficultyTier, number> = {
   Foundational: 1,
@@ -162,22 +165,31 @@ export async function POST(req: NextRequest) {
         }
       );
     } catch (error) {
-      await collection.deleteOne({ _id: result.insertedId }).catch(() => {});
       console.error(
         "[POST /api/mock/session] question generation failed:",
         error instanceof Error ? error.message : error
       );
-      return NextResponse.json(
+      newSession.questions = generateFallbackSessionQuestions({
+        sessionId,
+        interviewType,
+        level,
+        focus,
+        count: plannedQuestionCount,
+      });
+      newSession.pipeline = {
+        provider: "local",
+        model: "curated-fallback",
+        mode: "generate",
+      };
+      await collection.updateOne(
+        { _id: result.insertedId },
         {
-          error: "Failed to generate interview questions.",
-          detail:
-            process.env.NODE_ENV === "development"
-              ? error instanceof Error
-                ? error.message
-                : "Unknown question generation error"
-              : "Question provider or server configuration is unavailable.",
-        },
-        { status: 500 }
+          $set: {
+            questions: newSession.questions,
+            pipeline: newSession.pipeline,
+            updatedAt: new Date(),
+          },
+        }
       );
     }
 

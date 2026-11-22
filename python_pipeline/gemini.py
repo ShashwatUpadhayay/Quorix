@@ -3,6 +3,7 @@ import os
 import time
 import urllib.error
 import urllib.request
+import random
 from dataclasses import dataclass
 from typing import Any
 
@@ -79,16 +80,40 @@ class GeminiClient:
             method="POST",
         )
 
-        try:
-            with urllib.request.urlopen(
-                request, timeout=self.timeout_seconds
-            ) as response:
-                payload = json.loads(response.read().decode("utf-8"))
-        except urllib.error.HTTPError as error:
-            detail = error.read().decode("utf-8", "replace")[:500]
-            raise GeminiError(f"Gemini returned HTTP {error.code}: {detail}")
-        except (urllib.error.URLError, TimeoutError, OSError) as error:
-            raise GeminiError(f"Gemini request failed: {error}")
+        max_attempts = max(
+            1,
+            int(os.getenv("GEMINI_MAX_RETRIES", "4")),
+        )
+        retryable = {429, 503, 504}
+        payload: dict[str, Any] | None = None
+        last_error: Exception | None = None
+
+        for attempt in range(1, max_attempts + 1):
+            try:
+                with urllib.request.urlopen(
+                    request, timeout=self.timeout_seconds
+                ) as response:
+                    payload = json.loads(response.read().decode("utf-8"))
+                break
+            except urllib.error.HTTPError as error:
+                detail = error.read().decode("utf-8", "replace")[:500]
+                last_error = GeminiError(
+                    f"Gemini returned HTTP {error.code}: {detail}"
+                )
+                if error.code not in retryable or attempt == max_attempts:
+                    raise last_error
+            except (urllib.error.URLError, TimeoutError, OSError) as error:
+                last_error = GeminiError(f"Gemini request failed: {error}")
+                if attempt == max_attempts:
+                    raise last_error
+
+            base_delay = int(os.getenv("GEMINI_RETRY_BASE_MS", "1000")) / 1000
+            delay = min(15.0, base_delay * (2 ** (attempt - 1)))
+            delay += random.random() * 0.5
+            time.sleep(delay)
+
+        if payload is None:
+            raise last_error or GeminiError("Gemini retries exhausted")
 
         raw = "".join(
             part.get("text", "")
