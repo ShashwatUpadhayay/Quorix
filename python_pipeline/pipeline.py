@@ -63,6 +63,9 @@ class GeneratedQuestion:
     stage: str
     expected_points: list[str]
     competency_tags: list[str]
+    codeStarter: str | None = None
+    constraints: list[str] = field(default_factory=list)
+    examples: list[dict[str, str]] = field(default_factory=list)
 
 
 CURATED = [
@@ -77,11 +80,16 @@ CURATED = [
     GeneratedQuestion("An Airflow pipeline produces late and inconsistent data. How would you improve correctness and observability?", "Data Engineering", "Pipeline Reliability", 4, "technical", ["Data lineage", "Retries", "Data quality", "SLOs"], ["Airflow", "data quality"]),
     GeneratedQuestion("How would you evaluate whether an LLM-based retrieval system is improving answer quality?", "AI & ML Systems", "LLM Evaluation", 4, "technical", ["Baseline", "Retrieval metrics", "Answer metrics", "Guardrails"], ["RAG", "evaluation"]),
     GeneratedQuestion("You need to detect a cycle in a large directed graph efficiently. Explain your approach and complexity trade-offs.", "Algorithms & Data Structures", "Graphs", 3, "technical", ["Graph representation", "Algorithm", "Complexity", "Edge cases"], ["graphs", "complexity"]),
+    GeneratedQuestion("Given an integer array, return the length of the longest strictly increasing subarray.", "Algorithms & Data Structures", "Arrays", 2, "icebreaker", ["Linear traversal", "Current run", "Best run", "Edge cases"], ["arrays", "two pointers"], "function longestIncreasingSubarray(nums) {\n  // Write your solution here\n}\n", ["1 <= nums.length <= 100000", "Values may be negative", "Return 0 for an empty array"], [{"input": "nums = [1, 3, 5, 4, 7]", "output": "3", "explanation": "The longest run is [1, 3, 5]."}]),
+    GeneratedQuestion("Given a binary tree and a target value, determine whether a root-to-leaf path sums to the target.", "Algorithms & Data Structures", "Trees", 3, "technical", ["DFS", "Remaining sum", "Leaf validation", "Empty tree"], ["trees", "depth-first search"], "function hasPathSum(root, target) {\n  // Write your solution here\n}\n", ["Nodes are integers", "Do not count a partial path as a complete result"], [{"input": "root = [5,4,8,11,null,13,4,7,2,null,null,null,1], target = 22", "output": "true", "explanation": "5 -> 4 -> 11 -> 2 sums to 22."}]),
+    GeneratedQuestion("Given a directed graph, find whether it is possible to finish all courses from its prerequisite pairs.", "Algorithms & Data Structures", "Graphs", 4, "technical", ["Graph representation", "Cycle detection", "In-degree processing", "Complexity"], ["graphs", "topological sort"], "function canFinish(numCourses, prerequisites) {\n  // Write your solution here\n}\n", ["0 <= numCourses <= 2000", "No duplicate prerequisite pairs", "A course should not depend on itself"], [{"input": "numCourses = 2, prerequisites = [[1, 0]]", "output": "true", "explanation": "Take course 0, then course 1."}]),
     GeneratedQuestion("Tell me about a difficult production incident you led. How did you align the team and communicate the trade-offs?", "Engineering Leadership", "Incident Leadership", 3, "techno_managerial", ["Decision ownership", "Communication", "Trade-offs", "Learning"], ["incident management", "leadership"]),
 ]
 
 
 def resolve_domain(request: QuestionRequest) -> str:
+    if request.interview_type.lower() == "coding":
+        return "Algorithms & Data Structures"
     if request.domain:
         return request.domain
     text = " ".join(
@@ -151,6 +159,20 @@ QUESTION_SCHEMA = {
         "stage": {"type": "string", "enum": list(STAGES)},
         "expectedPoints": {"type": "array", "items": {"type": "string"}, "minItems": 2, "maxItems": 8},
         "competencyTags": {"type": "array", "items": {"type": "string"}, "minItems": 1, "maxItems": 10},
+        "codeStarter": {"type": "string"},
+        "constraints": {"type": "array", "items": {"type": "string"}},
+        "examples": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "input": {"type": "string"},
+                    "output": {"type": "string"},
+                    "explanation": {"type": "string"},
+                },
+                "required": ["input", "output"],
+            },
+        },
     },
     "required": ["text", "topic", "subtopic", "difficulty", "stage", "expectedPoints", "competencyTags"],
 }
@@ -197,6 +219,7 @@ class QuestionPipeline:
                         attempt,
                         False,
                         "Generated and accepted by local validation",
+                        request,
                     )
                 except (OllamaError, GeminiError, ValueError, KeyError) as error:
                     reason = str(error)
@@ -204,6 +227,7 @@ class QuestionPipeline:
                 domain, stage, difficulty,
                 f"{self.provider} generation failed; served local fallback. Reason: {reason}",
                 2,
+                request,
             )
 
         question = self._select(domain, stage, difficulty)
@@ -213,6 +237,7 @@ class QuestionPipeline:
             0,
             True,
             "Ollama is unavailable; selected the best local curated question",
+            request,
         )
 
     def doctor(self) -> dict:
@@ -246,10 +271,16 @@ class QuestionPipeline:
         return random.choice(shortlist)
 
     def _fallback(
-        self, domain: str, stage: str, difficulty: int, reason: str, attempts: int
+        self,
+        domain: str,
+        stage: str,
+        difficulty: int,
+        reason: str,
+        attempts: int,
+        request: QuestionRequest,
     ) -> dict:
         question = self._select(domain, stage, difficulty)
-        return self._response(question, "fallback", attempts, True, reason)
+        return self._response(question, "fallback", attempts, True, reason, request)
 
     def _generate(
         self,
@@ -261,10 +292,27 @@ class QuestionPipeline:
     ) -> GeneratedQuestion:
         style = [q.text for q in CURATED if q.topic == domain][:5]
         asked = "\n".join(f"- {text}" for text in request.asked_question_texts[-10:])
+        coding = request.interview_type.lower() == "coding"
         system = (
-            "You are a senior technical interviewer. Return only a single valid JSON "
-            "object. Write 1-3 sentences grounded in a realistic engineering situation "
-            "and do not repeat or paraphrase the already asked questions."
+            "You are a senior coding interviewer. Return only a single valid JSON object."
+            if coding
+            else "You are a senior technical interviewer. Return only a single valid JSON "
+                 "object."
+        )
+        system += (
+            " For coding questions, provide a clear DSA problem, starter function code,"
+            " constraints, and sample test cases. Do not repeat or paraphrase prior questions."
+        )
+        coding_contract = (
+            '\nReturn exactly this JSON object:\n'
+            '{"text":"...","topic":"Algorithms & Data Structures","subtopic":"...","difficulty":'
+            f'{difficulty},"stage":"{stage}","expectedPoints":["..."],"competencyTags":["..."],'
+            '"codeStarter":"function solution(input) {\\n  // Write your solution here\\n}\\n",'
+            '"constraints":["..."],"examples":[{"input":"...","output":"...","explanation":"..."}]}'
+            if coding
+            else '\nReturn exactly this JSON object:\n'
+                 '{"text":"...","topic":"%s","subtopic":"...","difficulty":%d,"stage":"%s",'
+                 '"expectedPoints":["..."],"competencyTags":["..."]}' % (domain, difficulty, stage)
         )
         prompt = f"""Create the next interview question.
 Session variation seed: {request.generation_seed or "default"}
@@ -287,8 +335,7 @@ Already asked:
 Local style examples:
 {chr(10).join(f"- {text}" for text in style) or "- none"}
 
-Return exactly this JSON object:
-{{"text":"...","topic":"{domain}","subtopic":"...","difficulty":{difficulty},"stage":"{stage}","expectedPoints":["..."],"competencyTags":["..."]}}"""
+{coding_contract}"""
         if self.provider == "gemini":
             result = self.gemini.generate_json(
                 system=system,
@@ -319,6 +366,17 @@ Return exactly this JSON object:
             stage=stage_value,
             expected_points=[str(x) for x in data["expectedPoints"]],
             competency_tags=[str(x) for x in data["competencyTags"]],
+            codeStarter=str(data.get("codeStarter") or "") if coding else None,
+            constraints=[str(x) for x in data.get("constraints", [])] if coding else [],
+            examples=[
+                {
+                    "input": str(item.get("input", "")),
+                    "output": str(item.get("output", "")),
+                    "explanation": str(item.get("explanation", "")),
+                }
+                for item in data.get("examples", [])
+                if isinstance(item, dict)
+            ] if coding else [],
         )
 
     def _is_duplicate(self, question: GeneratedQuestion, asked: Iterable[str]) -> bool:
@@ -336,7 +394,26 @@ Return exactly this JSON object:
         attempts: int,
         fallback_used: bool,
         reason: str,
+        request: QuestionRequest | None = None,
     ) -> dict:
+        if request and request.interview_type.lower() == "coding":
+            question.codeStarter = question.codeStarter or (
+                "function solution(input) {\n"
+                "  // Implement your solution here\n"
+                "}\n"
+            )
+            question.constraints = question.constraints or [
+                f"Optimize for the selected {request.profile.level.lower()} difficulty",
+                "Handle empty inputs and boundary values",
+                "Explain time and space complexity",
+            ]
+            question.examples = question.examples or [
+                {
+                    "input": "input = sample input",
+                    "output": "expected output",
+                    "explanation": "Derive the result using the stated constraints.",
+                }
+            ]
         return {
             "question": asdict(question)
             | {
