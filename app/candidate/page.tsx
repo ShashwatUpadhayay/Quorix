@@ -123,26 +123,31 @@ const INTERVIEW_TYPES: Array<{
   id: InterviewType;
   title: string;
   desc: string;
+  available: boolean;
 }> = [
   {
     id: "coding",
     title: "Coding & Algorithms",
     desc: "Data structures, algorithmic problem solving & live code editor",
+    available: true,
   },
   {
     id: "technical",
     title: "Technical Systems",
     desc: "Framework internals, memory, concurrency & runtime mechanics",
+    available: true,
   },
   {
     id: "system_design",
     title: "System Design",
     desc: "Distributed scalability, storage, caching & high availability",
+    available: false,
   },
   {
     id: "behavioral",
     title: "Behavioral & Leadership",
     desc: "STAR methodology, high-stakes incidents & trade-off decisions",
+    available: false,
   },
 ];
 
@@ -210,7 +215,7 @@ export default function CandidateWorkspace() {
   const [boardNotice, setBoardNotice] = useState<string | null>(null);
 
   // Boardrooms Sub-Tab: "panel" | "quizzes"
-  const [boardSubTab, setBoardSubTab] = useState<"panel" | "quizzes">("panel");
+  const [boardSubTab] = useState<"panel" | "quizzes">("quizzes");
 
   // Candidate Quizzes State
   const [candidateQuizzes, setCandidateQuizzes] = useState<CandidateQuizItem[]>([]);
@@ -798,11 +803,16 @@ export default function CandidateWorkspace() {
                             }`}
                           >
                             <option value="" disabled>
-                              Select interview format (Coding, Technical, System Design, Behavioral)...
+                              Select interview format (Coding or Technical Systems)...
                             </option>
                             {INTERVIEW_TYPES.map((type) => (
-                              <option key={type.id} value={type.id}>
+                              <option
+                                key={type.id}
+                                value={type.id}
+                                disabled={!type.available}
+                              >
                                 {type.title} — {type.desc}
+                                {!type.available ? " (Coming soon)" : ""}
                               </option>
                             ))}
                           </select>
@@ -1217,30 +1227,9 @@ export default function CandidateWorkspace() {
                     </p>
                   </div>
 
-                  {/* Sub-Tab Navigation */}
-                  <div className="inline-flex rounded-lg border border-[#E5E2DA] bg-[#F2EFE9] p-1 gap-1 shrink-0">
-                    <button
-                      onClick={() => setBoardSubTab("panel")}
-                      className={`inline-flex items-center gap-2 px-3.5 py-2 rounded-md text-xs font-medium transition-all ${
-                        boardSubTab === "panel"
-                          ? "bg-[#FFFFFF] text-[#1A1918] font-semibold shadow-xs"
-                          : "text-[#6E6B65] hover:text-[#1A1918]"
-                      }`}
-                    >
-                      <Radio className="w-3.5 h-3.5 text-[#1F7A55]" />
-                      <span>Live Panel</span>
-                    </button>
-                    <button
-                      onClick={() => setBoardSubTab("quizzes")}
-                      className={`inline-flex items-center gap-2 px-3.5 py-2 rounded-md text-xs font-medium transition-all ${
-                        boardSubTab === "quizzes"
-                          ? "bg-[#FFFFFF] text-[#1A1918] font-semibold shadow-xs"
-                          : "text-[#6E6B65] hover:text-[#1A1918]"
-                      }`}
-                    >
-                      <HelpCircle className="w-3.5 h-3.5 text-[#1A1918]" />
-                      <span>Expert Quizzes ({candidateQuizzes.length})</span>
-                    </button>
+                  <div className="inline-flex items-center gap-2 rounded-lg border border-[#E5E2DA] bg-[#FFFFFF] px-3.5 py-2 text-xs font-semibold text-[#1A1918] shrink-0">
+                    <HelpCircle className="w-3.5 h-3.5 text-[#1F7A55]" />
+                    <span>Expert Quizzes ({candidateQuizzes.length})</span>
                   </div>
                 </div>
 

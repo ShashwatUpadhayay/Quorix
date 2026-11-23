@@ -74,7 +74,7 @@ export default function ExpertWorkspace() {
   >("boardroom");
 
   // Sub-tab inside "Live Boardrooms": 'panel' or 'quizzes'
-  const [boardroomSubTab, setBoardroomSubTab] = useState<"panel" | "quizzes">("panel");
+  const [boardroomSubTab, setBoardroomSubTab] = useState<"panel" | "quizzes">("quizzes");
 
   // Inline toast state for anti-slop feedback (no browser alerts)
   const [toastMessage, setToastMessage] = useState<{
@@ -390,24 +390,32 @@ export default function ExpertWorkspace() {
       label: "Live Boardrooms",
       desc: "Live panels & hosted quizzes",
       icon: Users,
+      disabled: false,
+      comingSoon: false,
     },
     {
       id: "bank",
       label: "Question Suggester",
       desc: "Curated & ad-hoc check",
       icon: BookOpen,
+      disabled: true,
+      comingSoon: true,
     },
     {
       id: "evaluation",
       label: "Rubric Calibration",
       desc: "Human-in-the-loop override",
       icon: Sliders,
+      disabled: true,
+      comingSoon: true,
     },
     {
       id: "profile",
       label: "Expert Profile",
       desc: "Dossier & daily activity",
       icon: Award,
+      disabled: true,
+      comingSoon: true,
     },
   ] as const;
 
@@ -468,28 +476,64 @@ export default function ExpertWorkspace() {
             {sidebarNavItems.map((item) => {
               const Icon = item.icon;
               const isActive = activeFeature === item.id;
+              const isDisabled = item.disabled;
+              const isComingSoon = item.comingSoon;
+
+              // Disable click and apply coming-soon styling if marked
+              const handleClick = () => {
+                if (isDisabled || isComingSoon) return;
+                setActiveFeature(item.id);
+                hydrateFromProfile();
+              };
+
+              const baseClass = "w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-xs text-left transition-all";
+              const activeClass = "bg-[#FFFFFF] text-[#1A1918] font-semibold border border-[#E5E2DA] shadow-xs";
+              const inactiveClass = "text-[#6E6B65] hover:text-[#1A1918] hover:bg-[#F2EFE9]";
+
+              let buttonClass = baseClass;
+
+              if (isDisabled || isComingSoon) {
+                buttonClass += " opacity-50 cursor-not-allowed";
+              } else if (isActive) {
+                buttonClass += " " + activeClass;
+              } else {
+                buttonClass += " " + inactiveClass;
+              }
+
               return (
                 <button
                   key={item.id}
-                  onClick={() => {
-                    setActiveFeature(item.id);
-                    if (item.id !== "profile") {
-                      hydrateFromProfile();
-                    }
-                  }}
-                  className={`w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-xs text-left transition-all ${
-                    isActive
-                      ? "bg-[#FFFFFF] text-[#1A1918] font-semibold border border-[#E5E2DA] shadow-xs"
-                      : "text-[#6E6B65] hover:text-[#1A1918] hover:bg-[#F2EFE9]"
-                  }`}
+                  onClick={handleClick}
+                  disabled={isDisabled || isComingSoon}
+                  className={buttonClass}
+                  title={isComingSoon ? "Coming soon" : undefined}
                 >
                   <div className="flex items-center space-x-2.5">
-                    <Icon className="w-4 h-4 text-[#1A1918] shrink-0" />
+                    <Icon
+                      className={isComingSoon || isDisabled
+                        ? "w-4 h-4 text-[#8E8B84] shrink-0"
+                        : "w-4 h-4 text-[#1A1918] shrink-0"}
+                    />
                     <div>
-                      <div className="leading-snug">{item.label}</div>
-                      <div className="text-[10px] text-[#8E8B84] font-normal font-sans">
-                        {item.desc}
+                      <div className="leading-snug">
+                        {isComingSoon ? (
+                          <span className="text-xs font-medium text-[#8E8B84]">
+                            {item.label} <span className="text-[10px] text-[#B45332]">Coming soon</span>
+                          </span>
+                        ) : (
+                          <div className="leading-snug">{item.label}</div>
+                        )}
                       </div>
+                      {isComingSoon && (
+                        <div className="text-[10px] text-[#B45332] font-normal font-sans">
+                          Coming soon
+                        </div>
+                      )}
+                      {(!isComingSoon && !isDisabled) && (
+                        <div className="text-[10px] text-[#8E8B84] font-normal font-sans">
+                          {item.desc}
+                        </div>
+                      )}
                     </div>
                   </div>
                 </button>
@@ -557,12 +601,13 @@ export default function ExpertWorkspace() {
                   {/* Segmented Switcher for Panel vs Quizzes */}
                   <div className="inline-flex rounded-lg border border-[#E5E2DA] bg-[#F2EFE9] p-1 gap-1 shrink-0">
                     <button
-                      onClick={() => setBoardroomSubTab("panel")}
+                      disabled
                       className={`inline-flex items-center gap-2 px-3.5 py-2 rounded-md text-xs font-medium transition-all ${
                         boardroomSubTab === "panel"
-                          ? "bg-[#FFFFFF] text-[#1A1918] font-semibold shadow-xs"
-                          : "text-[#6E6B65] hover:text-[#1A1918]"
+                          ? "bg-[#FFFFFF] text-[#1A1918] font-semibold shadow-xs opacity-50 cursor-not-allowed"
+                          : "text-[#6E6B65] hover:text-[#1A1918] hover:bg-[#F2EFE9] opacity-50 cursor-not-allowed"
                       }`}
+                      title="Coming soon"
                     >
                       <Radio className="w-3.5 h-3.5 text-[#1F7A55]" />
                       <span>Live Panel Session</span>
@@ -572,17 +617,27 @@ export default function ExpertWorkspace() {
                       className={`inline-flex items-center gap-2 px-3.5 py-2 rounded-md text-xs font-medium transition-all ${
                         boardroomSubTab === "quizzes"
                           ? "bg-[#FFFFFF] text-[#1A1918] font-semibold shadow-xs"
-                          : "text-[#6E6B65] hover:text-[#1A1918]"
+                          : "text-[#6E6B65] hover:text-[#1A1918] hover:bg-[#F2EFE9]"
                       }`}
                     >
-                      <HelpCircle className="w-3.5 h-3.5 text-[#1A1918]" />
+                      <HelpCircle className="w-3.5 h-3.5 text-[#1F7A55]" />
                       <span>Host Quizzes ({quizzes.length})</span>
                     </button>
                   </div>
                 </div>
 
-                {/* SUB-VIEW A: LIVE PANEL INTERVIEW */}
+                {/* SUB-VIEW A: LIVE PANEL INTERVIEW - Coming Soon */}
                 {boardroomSubTab === "panel" && (
+                  <div className="space-y-6">
+                    <div className="rounded-xl border border-[#E5E2DA] bg-[#FFFFFF] p-1.5 text-center text-xs font-mono text-[#8E8B84]">
+                      <div>Coming soon</div>
+                      <p className="mt-2">Live Panel Session is coming soon</p>
+                    </div>
+                  </div>
+                )}
+
+                {/* SUB-VIEW B: HOST & MANAGE QUIZZES - Visible */}
+                {boardroomSubTab === "quizzes" && (
                   <div className="space-y-6">
                     {/* Active Session Info Bar in Double-Bezel Card */}
                     <div className="rounded-xl border border-[#E5E2DA] bg-[#F2EFE9] p-1.5">
