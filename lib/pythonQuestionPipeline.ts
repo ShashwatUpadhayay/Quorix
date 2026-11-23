@@ -45,6 +45,62 @@ function toText(value: unknown): string {
   }
 }
 
+function parseJsonObject<T>(raw: string): T {
+  let text = raw.trim();
+  if (text.startsWith("```")) {
+    text = text
+      .replace(/^```(?:json)?\s*/i, "")
+      .replace(/\s*```$/, "")
+      .trim();
+  }
+
+  const candidates: string[] = [text];
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  let objectStart = -1;
+
+  for (let index = 0; index < text.length; index += 1) {
+    const character = text[index];
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (character === "\\") {
+        escaped = true;
+      } else if (character === '"') {
+        inString = false;
+      }
+      continue;
+    }
+    if (character === '"') {
+      inString = true;
+      continue;
+    }
+    if (character === "{") {
+      if (depth === 0) objectStart = index;
+      depth += 1;
+    } else if (character === "}") {
+      depth -= 1;
+      if (depth === 0 && objectStart >= 0) {
+        candidates.push(text.slice(objectStart, index + 1));
+        objectStart = -1;
+      }
+    }
+  }
+
+  for (const candidate of candidates) {
+    try {
+      return JSON.parse(candidate) as T;
+    } catch {
+      continue;
+    }
+  }
+
+  throw new SyntaxError(
+    "Response did not contain a complete valid JSON object"
+  );
+}
+
 function pythonExecutable(): string {
   return process.env.PYTHON_EXECUTABLE || "python";
 }
@@ -698,23 +754,9 @@ ${
   const payload = (await response.json()) as {
     choices?: Array<{ message?: { content?: string } }>;
   };
-  let raw = payload.choices?.[0]?.message?.content?.trim() || "";
+  const raw = payload.choices?.[0]?.message?.content?.trim() || "";
   if (!raw) throw new Error("Groq returned an empty response");
-  if (raw.startsWith("```")) {
-    raw = raw
-      .replace(/^```(?:json)?\s*/i, "")
-      .replace(/\s*```$/, "")
-      .trim();
-  }
-  if (!raw.startsWith("{")) {
-    const objectStart = raw.indexOf("{");
-    const objectEnd = raw.lastIndexOf("}");
-    if (objectStart >= 0 && objectEnd > objectStart) {
-      raw = raw.slice(objectStart, objectEnd + 1);
-    }
-  }
-
-  const parsed = JSON.parse(raw) as {
+  let parsed: {
     questions: Array<{
       text: string;
       topic: string;
@@ -732,6 +774,15 @@ ${
       examplesSample?: Array<{ input: unknown; output: unknown; explanation?: unknown }>;
     }>;
   };
+  try {
+    parsed = parseJsonObject(raw);
+  } catch (error) {
+    throw new Error(
+      `Groq returned invalid JSON: ${
+        error instanceof Error ? error.message : "JSON parsing failed"
+      }. Response preview: ${raw.slice(0, 300)}`
+    );
+  }
   if (!Array.isArray(parsed.questions) || parsed.questions.length !== params.count) {
     throw new Error(
       `Groq returned ${parsed.questions?.length || 0} questions; expected ${params.count}`

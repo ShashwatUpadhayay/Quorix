@@ -13,6 +13,26 @@ from python_pipeline.pipeline import (
 
 
 class QuestionPipelineTests(unittest.TestCase):
+    def test_duplicate_generation_fallback_has_no_unbound_reason(self) -> None:
+        ollama = OllamaClient(base_url="http://127.0.0.1:1")
+        ollama.reachable = lambda: True
+        pipeline = QuestionPipeline(ollama)
+        request = QuestionRequest(
+            session_id="test-duplicates",
+            interview_type="technical",
+            focus="Backend & APIs",
+            profile=Profile(level="Intermediate"),
+            mode="generate",
+            asked_question_texts=["What is the retry policy?"],
+        )
+        pipeline._generate = lambda *_args, **_kwargs: pipeline._select(
+            "Backend & APIs", "technical", 2
+        )
+        pipeline._is_duplicate = lambda *_args, **_kwargs: True
+
+        result = pipeline.run(request)
+        self.assertEqual(result["source"], "fallback")
+        self.assertIn("duplicated", result["reason"])
     def test_coding_requests_include_dsa_editor_metadata_in_fallback(self) -> None:
         pipeline = QuestionPipeline(OllamaClient(base_url="http://127.0.0.1:1"))
         result = pipeline.run(

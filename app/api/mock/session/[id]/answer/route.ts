@@ -109,7 +109,7 @@ export async function POST(req: NextRequest, context: RouteContext) {
     let categoryScores = session.categoryScores;
     let summaryFeedback = session.summaryFeedback;
     let nextQuestion: MockSessionQuestion | null = null;
-    let pipelineMeta = session.pipeline;
+    const pipelineMeta = session.pipeline;
 
     if (!isCompleted) {
       nextQuestion = session.questions[nextIndex] || null;

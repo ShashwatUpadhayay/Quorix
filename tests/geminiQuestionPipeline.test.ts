@@ -20,30 +20,34 @@ test("Groq coding sessions use the OpenAI-compatible response shape", async () =
     const body = JSON.parse(String(init?.body));
     assert.equal(body.model, "openai/gpt-oss-120b");
     assert.equal(body.response_format.type, "json_object");
+    const payloadText =
+      "```json\n" +
+      JSON.stringify({
+        questions: [
+          {
+            text: "Given an integer array, return the longest increasing subarray.",
+            topic: "Algorithms & Data Structures",
+            subtopic: "Arrays",
+            difficulty: 2,
+            stage: "icebreaker",
+            expectedPoints: ["Linear traversal", "Run tracking"],
+            competencyTags: ["arrays", "iteration"],
+            sampleCases: [
+              {
+                input: [1, 3, 5, 4, 7],
+                output: 3,
+              },
+            ],
+          },
+        ],
+      }) +
+      "\n```\nUnexpected trailing text";
     return new Response(
       JSON.stringify({
         choices: [
           {
             message: {
-              content: JSON.stringify({
-                questions: [
-                  {
-                    text: "Given an integer array, return the longest increasing subarray.",
-                    topic: "Algorithms & Data Structures",
-                    subtopic: "Arrays",
-                    difficulty: 2,
-                    stage: "icebreaker",
-                    expectedPoints: ["Linear traversal", "Run tracking"],
-                    competencyTags: ["arrays", "iteration"],
-                    sampleCases: [
-                      {
-                        input: [1, 3, 5, 4, 7],
-                        output: 3,
-                      },
-                    ],
-                  },
-                ],
-              }),
+              content: payloadText,
             },
           },
         ],

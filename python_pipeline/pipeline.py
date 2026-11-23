@@ -201,12 +201,14 @@ class QuestionPipeline:
         )
 
         if request.mode in ("auto", "generate") and self.ollama.reachable():
+            reason = "No generated question passed local validation"
             for attempt in range(1, 3):
                 try:
                     question = self._generate(
                         request, domain, stage, difficulty, attempt
                     )
                     if self._is_duplicate(question, request.asked_question_texts):
+                        reason = "Generated question duplicated a previously asked question"
                         continue
                     return self._response(
                         question,
