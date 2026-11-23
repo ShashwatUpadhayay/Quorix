@@ -25,6 +25,7 @@ import {
   FileText,
   RefreshCw,
   Radio,
+  Loader2,
 } from "lucide-react";
 import UserProfileView from "@/components/UserProfileView";
 import type {
@@ -1055,7 +1056,11 @@ export default function CandidateWorkspace() {
                                 : "Launch Mock Interview Room"}
                             </span>
                             <span className="w-6 h-6 rounded-md bg-[#FAF8F5]/12 flex items-center justify-center transition-transform group-hover:translate-x-0.5">
-                              <ArrowRight className="w-3.5 h-3.5" />
+                              {isLaunchingSession ? (
+                                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                              ) : (
+                                <ArrowRight className="w-3.5 h-3.5" />
+                              )}
                             </span>
                           </button>
                         </div>

@@ -36,18 +36,23 @@ function pythonExecutable(): string {
   return process.env.PYTHON_EXECUTABLE || "python";
 }
 
-function providerName(): "ollama" | "gemini" {
-  const provider = (process.env.LLM_PROVIDER || "ollama").toLowerCase();
-  return provider === "gemini" ? "gemini" : "ollama";
+function providerName(): "ollama" | "gemini" | "groq" {
+  return process.env.NODE_ENV === "production" ? "groq" : "ollama";
 }
 
-async function fetchGeminiWithRetry(
+async function fetchWithRetry(
   url: string,
-  init: RequestInit
+  init: RequestInit,
+  provider: "Gemini" | "Groq"
 ): Promise<Response> {
+  const isGroq = provider === "Groq";
   const maxRetries = Math.max(
     1,
-    Number(process.env.GEMINI_MAX_RETRIES) || 4
+    Number(
+      isGroq
+        ? process.env.GROQ_MAX_RETRIES
+        : process.env.GEMINI_MAX_RETRIES
+    ) || 4
   );
   const retryableStatuses = new Set([429, 503, 504]);
 
@@ -56,7 +61,11 @@ async function fetchGeminiWithRetry(
       const response = await fetch(url, {
         ...init,
         signal: AbortSignal.timeout(
-          Number(process.env.GEMINI_TIMEOUT_MS) || 120_000
+          Number(
+            isGroq
+              ? process.env.GROQ_TIMEOUT_MS
+              : process.env.GEMINI_TIMEOUT_MS
+          ) || 120_000
         ),
       });
 
@@ -69,32 +78,40 @@ async function fetchGeminiWithRetry(
       }
 
       const baseDelay =
-        Number(process.env.GEMINI_RETRY_BASE_MS) || 1_000;
+        Number(
+          isGroq
+            ? process.env.GROQ_RETRY_BASE_MS
+            : process.env.GEMINI_RETRY_BASE_MS
+        ) || 1_000;
       const delay = Math.min(
         15_000,
         baseDelay * 2 ** (attempt - 1) +
           Math.floor(Math.random() * 500)
       );
       console.warn(
-        `[Gemini] HTTP ${response.status}; retrying in ${delay}ms (${attempt}/${maxRetries})`
+        `[${provider}] HTTP ${response.status}; retrying in ${delay}ms (${attempt}/${maxRetries})`
       );
       await new Promise((resolve) => setTimeout(resolve, delay));
     } catch (error) {
       if (attempt === maxRetries) throw error;
       const baseDelay =
-        Number(process.env.GEMINI_RETRY_BASE_MS) || 1_000;
+        Number(
+          isGroq
+            ? process.env.GROQ_RETRY_BASE_MS
+            : process.env.GEMINI_RETRY_BASE_MS
+        ) || 1_000;
       const delay = Math.min(
         15_000,
         baseDelay * 2 ** (attempt - 1)
       );
       console.warn(
-        `[Gemini] Request failed; retrying in ${delay}ms (${attempt}/${maxRetries})`
+        `[${provider}] Request failed; retrying in ${delay}ms (${attempt}/${maxRetries})`
       );
       await new Promise((resolve) => setTimeout(resolve, delay));
     }
   }
 
-  throw new Error("Gemini retries exhausted");
+  throw new Error(`${provider} retries exhausted`);
 }
 
 export function generateFallbackSessionQuestions(params: {
@@ -195,7 +212,7 @@ export function generateFallbackSessionQuestions(params: {
       generationMeta: {
         provider: "local",
         model: "curated-fallback",
-        validationReason: "Gemini unavailable; local fallback used",
+        validationReason: "Configured AI provider unavailable; local fallback used",
       },
     };
   });
@@ -217,11 +234,8 @@ async function generateWithGemini(params: {
     throw new Error("GEMINI_API_KEY is not configured");
   }
 
-  const configuredModel =
-    process.env.GEMINI_MODEL || "gemini-3.8-flash";
-  const model = configuredModel.includes("2.5")
-    ? "gemini-3.8-flash"
-    : configuredModel;
+  const model =
+    process.env.GEMINI_MODEL?.trim() || "gemini-2.5-flash";
   const baseUrl =
     process.env.GEMINI_API_BASE_URL ||
     "https://generativelanguage.googleapis.com/v1beta";
@@ -275,10 +289,17 @@ ${questionSpecs
 
 Requirements:
 - Every question must be different and not paraphrase another question.
-- Use 1-3 self-contained sentences grounded in a realistic engineering scenario.
 - Match the stage and difficulty exactly.
 - Provide 2-5 expectedPoints and 1-6 competencyTags.
-- If interview type is coding, generate a genuine DSA problem with a function starter, constraints, and sample test cases.
+${
+  params.interviewType === "coding"
+    ? `- Generate genuine coding interview / DSA problems only.
+- Each problem must include the input format, output format, constraints, at least one sample test case, and an intended algorithm category.
+- Each codeStarter must be a valid function scaffold for JavaScript/TypeScript with no solution implementation.
+- Keep constraints and sample test cases internally consistent.
+- Do not produce system design, conceptual, or behavioral questions.`
+    : `- Use 1-3 self-contained sentences grounded in a realistic engineering scenario.`
+}
 - Return a JSON object containing only one "questions" array.`;
 
   const questionSchema = {
@@ -337,6 +358,9 @@ Requirements:
             "stage",
             "expectedPoints",
             "competencyTags",
+            ...(params.interviewType === "coding"
+              ? ["codeStarter", "constraints", "examples"]
+              : []),
           ],
         },
       },
@@ -349,27 +373,29 @@ Requirements:
       parts: [
         {
           text:
-            "You are a senior technical interviewer. Return only valid JSON.",
+            params.interviewType === "coding"
+              ? "You are a senior coding interviewer specializing in DSA. Return only valid JSON. Generate self-contained algorithm problems with starter code, constraints, and sample cases."
+              : "You are a senior technical interviewer. Return only valid JSON.",
         },
       ],
     },
     contents: [{ role: "user", parts: [{ text: prompt }] }],
     generationConfig: {
-      temperature: 0.8,
-      maxOutputTokens: 1800,
+      temperature: params.interviewType === "coding" ? 0.65 : 0.8,
+      maxOutputTokens: params.interviewType === "coding" ? 3000 : 1800,
       responseMimeType: "application/json",
       responseSchema: questionSchema,
     },
   });
 
-  const response = await fetchGeminiWithRetry(url, {
+  const response = await fetchWithRetry(url, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       "x-goog-api-key": apiKey,
     },
     body,
-  });
+  }, "Gemini");
 
   if (!response.ok) {
     throw new Error(
@@ -384,11 +410,17 @@ Requirements:
       content?: { parts?: Array<{ text?: string }> };
     }>;
   };
-  const raw = (payload.candidates?.[0]?.content?.parts || [])
+  let raw = (payload.candidates?.[0]?.content?.parts || [])
     .map((part) => part.text || "")
     .join("")
     .trim();
   if (!raw) throw new Error("Gemini returned an empty response");
+  if (raw.startsWith("```")) {
+    raw = raw
+      .replace(/^```(?:json)?\s*/i, "")
+      .replace(/\s*```$/, "")
+      .trim();
+  }
 
   const parsed = JSON.parse(raw) as {
     questions: Array<{
@@ -408,6 +440,26 @@ Requirements:
     throw new Error(
       `Gemini returned ${parsed.questions?.length || 0} questions; expected ${params.count}`
     );
+  }
+
+  if (params.interviewType === "coding") {
+    for (const question of parsed.questions) {
+      if (
+        !question.text?.trim() ||
+        !question.codeStarter?.trim() ||
+        !Array.isArray(question.constraints) ||
+        question.constraints.length === 0 ||
+        !Array.isArray(question.examples) ||
+        question.examples.length === 0 ||
+        !question.examples.every(
+          (example) => example.input?.trim() && example.output?.trim()
+        )
+      ) {
+        throw new Error(
+          "Gemini returned an incomplete coding or DSA question"
+        );
+      }
+    }
   }
 
   return parsed.questions.map((question, index) => {
@@ -495,6 +547,228 @@ function toSessionQuestion(
   };
 }
 
+async function generateWithGroq(params: {
+  sessionId: string;
+  interviewType: InterviewType;
+  level: DifficultyTier;
+  focus: string;
+  count: number;
+  experienceYears?: number;
+  tags?: string[];
+  topics?: string[];
+  focusAreas?: string[];
+}): Promise<PythonQuestionResponse[]> {
+  const apiKey = process.env.GROQ_API_KEY?.trim();
+  if (!apiKey) {
+    throw new Error("GROQ_API_KEY is not configured");
+  }
+
+  const model =
+    process.env.GROQ_MODEL?.trim() || "llama-3.3-70b-versatile";
+  const baseUrl =
+    process.env.GROQ_API_BASE_URL || "https://api.groq.com/openai/v1";
+  const url = `${baseUrl.replace(/\/$/, "")}/chat/completions`;
+  const ranges: Record<DifficultyTier, [number, number]> = {
+    Foundational: [1, 2],
+    Intermediate: [2, 3],
+    Senior: [3, 4],
+    Staff: [4, 5],
+  };
+  const [low, high] = ranges[params.level];
+  const sessionSeed = `${params.sessionId}-${Date.now()}-${Math.random()
+    .toString(36)
+    .slice(2)}`;
+  const questionSpecs: Array<{
+    difficulty: number;
+    stage: MockSessionQuestion["stage"];
+  }> = Array.from({ length: params.count }, (_, index) => {
+    const difficulty = Math.round(
+      low +
+        (high - low) *
+          (index / Math.max(params.count - 1, 1))
+    );
+    const stage =
+      index === 0
+        ? "icebreaker"
+        : index === params.count - 1
+          ? "techno_managerial"
+          : "technical";
+    return { difficulty, stage };
+  });
+
+  const coding = params.interviewType === "coding";
+  const prompt = `Create ${params.count} distinct interview questions for one mock interview.
+Session variation seed: ${sessionSeed}
+Interview type: ${params.interviewType}
+Candidate level: ${params.level}
+Experience: ${params.experienceYears || 0} years
+Focus: ${params.focus}
+Competency tags: ${(params.tags || []).join(", ") || "not provided"}
+Primary topics: ${(params.topics || []).join(", ") || "not provided"}
+Focus areas: ${(params.focusAreas || []).join(", ") || "not provided"}
+
+Question plan:
+${questionSpecs
+  .map(
+    (item, index) =>
+      `- Question ${index + 1}: stage=${item.stage}, difficulty=${item.difficulty}/5`
+  )
+  .join("\n")}
+
+Requirements:
+- Every question must be different and not paraphrase another question.
+- Match the stage and difficulty exactly.
+- Provide 2-5 expectedPoints and 1-6 competencyTags.
+${
+  coding
+    ? `- Generate genuine coding interview / DSA problems only.
+- Each problem must include the input format, output format, constraints, at least one sample test case, and an intended algorithm category.
+- Each codeStarter must be a valid function scaffold for JavaScript/TypeScript with no solution implementation.
+- Keep constraints and sample test cases internally consistent.
+- Do not produce system design, conceptual, or behavioral questions.`
+    : `- Use 1-3 self-contained sentences grounded in a realistic engineering scenario.`
+}
+- Return a JSON object containing only one "questions" array.
+- Each question must contain text, topic, subtopic, difficulty, stage, expectedPoints, and competencyTags.
+${
+  coding
+    ? `- Coding questions must also contain codeStarter, constraints, and examples (with input and output).`
+    : ""
+}`;
+
+  const body = JSON.stringify({
+    model,
+    messages: [
+      {
+        role: "system",
+        content: coding
+          ? "You are a senior coding interviewer specializing in DSA. Return only valid JSON. Generate self-contained algorithm problems with starter code, constraints, and sample cases."
+          : "You are a senior technical interviewer. Return only valid JSON.",
+      },
+      { role: "user", content: prompt },
+    ],
+    temperature: coding ? 0.65 : 0.8,
+    max_completion_tokens: coding ? 3000 : 1800,
+    response_format: { type: "json_object" },
+  });
+
+  const response = await fetchWithRetry(
+    url,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body,
+    },
+    "Groq"
+  );
+
+  if (!response.ok) {
+    throw new Error(
+      `Groq returned HTTP ${response.status}: ${(
+        await response.text()
+      ).slice(0, 500)}`
+    );
+  }
+
+  const payload = (await response.json()) as {
+    choices?: Array<{ message?: { content?: string } }>;
+  };
+  let raw = payload.choices?.[0]?.message?.content?.trim() || "";
+  if (!raw) throw new Error("Groq returned an empty response");
+  if (raw.startsWith("```")) {
+    raw = raw
+      .replace(/^```(?:json)?\s*/i, "")
+      .replace(/\s*```$/, "")
+      .trim();
+  }
+
+  const parsed = JSON.parse(raw) as {
+    questions: Array<{
+      text: string;
+      topic: string;
+      subtopic: string;
+      difficulty: number;
+      stage: PythonQuestionResponse["question"]["stage"];
+      expectedPoints: string[];
+      competencyTags: string[];
+      codeStarter?: string;
+      constraints?: string[];
+      examples?: Array<{ input: string; output: string; explanation?: string }>;
+    }>;
+  };
+  if (!Array.isArray(parsed.questions) || parsed.questions.length !== params.count) {
+    throw new Error(
+      `Groq returned ${parsed.questions?.length || 0} questions; expected ${params.count}`
+    );
+  }
+
+  if (coding) {
+    for (const question of parsed.questions) {
+      if (
+        !question.text?.trim() ||
+        !question.codeStarter?.trim() ||
+        !Array.isArray(question.constraints) ||
+        question.constraints.length === 0 ||
+        !Array.isArray(question.examples) ||
+        question.examples.length === 0 ||
+        !question.examples.every(
+          (example) => example.input?.trim() && example.output?.trim()
+        )
+      ) {
+        throw new Error("Groq returned an incomplete coding or DSA question");
+      }
+    }
+  }
+
+  return parsed.questions.map((question, index) => {
+    const spec = questionSpecs[index];
+    return {
+      question: {
+        id: `${params.sessionId}-${index + 1}-${sessionSeed.slice(-8)}`,
+        text: question.text,
+        topic: question.topic,
+        subtopic: question.subtopic,
+        difficulty: spec.difficulty,
+        stage: spec.stage,
+        expected_points: question.expectedPoints,
+        competency_tags: question.competencyTags,
+        status: "draft",
+        source: "generated",
+        codeStarter: coding
+          ? question.codeStarter ||
+            "function solution(input) {\n  // Implement your solution here\n}\n"
+          : undefined,
+        constraints: coding
+          ? question.constraints || [
+              "Handle empty and boundary inputs",
+              "Optimize for the stated problem size",
+              "Explain time and space complexity",
+            ]
+          : undefined,
+        examples: coding
+          ? question.examples || [
+              {
+                input: "input = sample input",
+                output: "expected output",
+                explanation: "Validate the solution against the stated constraints.",
+              },
+            ]
+          : undefined,
+      },
+      source: "generated",
+      accepted: true,
+      reason: "Generated and accepted by Groq",
+      attempts: 1,
+      provider: "groq",
+      model,
+      fallbackUsed: false,
+    };
+  });
+}
+
 export async function generateSessionQuestions(params: {
   sessionId: string;
   interviewType: InterviewType;
@@ -510,6 +784,31 @@ export async function generateSessionQuestions(params: {
   provider: string;
   model: string;
 }> {
+  if (providerName() === "groq") {
+    try {
+      const responses = await generateWithGroq(params);
+      return {
+        questions: responses.map((response, index) =>
+          toSessionQuestion(response, index + 1)
+        ),
+        provider: "groq",
+        model:
+          process.env.GROQ_MODEL?.trim() || "llama-3.3-70b-versatile",
+      };
+    } catch (error) {
+      console.error(
+        "[Groq] Batch generation failed; using local fallback:",
+        error instanceof Error ? error.message : error
+      );
+      const questions = generateFallbackSessionQuestions(params);
+      return {
+        questions,
+        provider: "local",
+        model: "curated-fallback",
+      };
+    }
+  }
+
   if (providerName() === "gemini") {
     try {
       const responses = await generateWithGemini(params);
@@ -518,10 +817,7 @@ export async function generateSessionQuestions(params: {
           toSessionQuestion(response, index + 1)
         ),
         provider: "gemini",
-        model:
-          process.env.GEMINI_MODEL?.includes("2.5")
-            ? "gemini-3.8-flash"
-            : process.env.GEMINI_MODEL || "gemini-3.8-flash",
+        model: process.env.GEMINI_MODEL?.trim() || "gemini-2.5-flash",
       };
     } catch (error) {
       console.error(

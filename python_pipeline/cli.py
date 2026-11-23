@@ -51,10 +51,7 @@ def main() -> None:
         print(json.dumps(pipeline.doctor(), indent=2))
         result = pipeline.doctor()
         if not result["provider_reachable"]:
-            if result["provider"] == "gemini":
-                print("Set GEMINI_API_KEY and configure GEMINI_MODEL.", file=sys.stderr)
-            else:
-                print("Start Ollama and run: ollama pull " + result["model"], file=sys.stderr)
+            print("Start Ollama and run: ollama pull " + result["model"], file=sys.stderr)
             raise SystemExit(1)
         return
 
