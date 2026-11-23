@@ -42,7 +42,7 @@ Set these server-side variables on the hosting platform:
 ```env
 LLM_PROVIDER=groq
 GROQ_API_KEY=<your-groq-api-key>
-GROQ_MODEL=llama-3.3-70b-versatile
+GROQ_MODEL=openai/gpt-oss-120b
 GROQ_API_BASE_URL=https://api.groq.com/openai/v1
 GROQ_MAX_RETRIES=4
 GROQ_RETRY_BASE_MS=1000

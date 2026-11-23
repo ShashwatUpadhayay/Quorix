@@ -563,8 +563,15 @@ async function generateWithGroq(params: {
     throw new Error("GROQ_API_KEY is not configured");
   }
 
+  const configuredModel = process.env.GROQ_MODEL?.trim();
+  const deprecatedGroqModels = new Set([
+    "llama-3.3-70b-versatile",
+    "llama-3.1-70b-versatile",
+  ]);
   const model =
-    process.env.GROQ_MODEL?.trim() || "llama-3.3-70b-versatile";
+    !configuredModel || deprecatedGroqModels.has(configuredModel)
+      ? "openai/gpt-oss-120b"
+      : configuredModel;
   const baseUrl =
     process.env.GROQ_API_BASE_URL || "https://api.groq.com/openai/v1";
   const url = `${baseUrl.replace(/\/$/, "")}/chat/completions`;
@@ -792,8 +799,14 @@ export async function generateSessionQuestions(params: {
           toSessionQuestion(response, index + 1)
         ),
         provider: "groq",
-        model:
-          process.env.GROQ_MODEL?.trim() || "llama-3.3-70b-versatile",
+        model: (() => {
+          const configuredModel = process.env.GROQ_MODEL?.trim();
+          return !configuredModel ||
+            configuredModel === "llama-3.3-70b-versatile" ||
+            configuredModel === "llama-3.1-70b-versatile"
+            ? "openai/gpt-oss-120b"
+            : configuredModel;
+        })(),
       };
     } catch (error) {
       console.error(
