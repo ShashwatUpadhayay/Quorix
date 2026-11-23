@@ -35,6 +35,12 @@ test("Groq coding sessions use the OpenAI-compatible response shape", async () =
                     stage: "icebreaker",
                     expectedPoints: ["Linear traversal", "Run tracking"],
                     competencyTags: ["arrays", "iteration"],
+                    sampleCases: [
+                      {
+                        input: [1, 3, 5, 4, 7],
+                        output: 3,
+                      },
+                    ],
                   },
                 ],
               }),
