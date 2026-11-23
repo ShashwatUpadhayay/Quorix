@@ -18,7 +18,7 @@ test("Groq coding sessions use the OpenAI-compatible response shape", async () =
   const previousFetch = globalThis.fetch;
   globalThis.fetch = (async (_url, init) => {
     const body = JSON.parse(String(init?.body));
-    assert.equal(body.model, "llama-3.3-70b-versatile");
+    assert.equal(body.model, "openai/gpt-oss-120b");
     assert.equal(body.response_format.type, "json_object");
     return new Response(
       JSON.stringify({
@@ -66,7 +66,7 @@ test("Groq coding sessions use the OpenAI-compatible response shape", async () =
     });
 
     assert.equal(result.provider, "groq");
-    assert.equal(result.model, "llama-3.3-70b-versatile");
+    assert.equal(result.model, "openai/gpt-oss-120b");
     assert.equal(result.questions.length, 1);
     assert.equal(
       result.questions[0].topic,
