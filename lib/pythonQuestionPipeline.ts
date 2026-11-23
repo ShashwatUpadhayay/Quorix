@@ -691,6 +691,13 @@ ${
       .replace(/\s*```$/, "")
       .trim();
   }
+  if (!raw.startsWith("{")) {
+    const objectStart = raw.indexOf("{");
+    const objectEnd = raw.lastIndexOf("}");
+    if (objectStart >= 0 && objectEnd > objectStart) {
+      raw = raw.slice(objectStart, objectEnd + 1);
+    }
+  }
 
   const parsed = JSON.parse(raw) as {
     questions: Array<{
@@ -704,6 +711,10 @@ ${
       codeStarter?: string;
       constraints?: string[];
       examples?: Array<{ input: string; output: string; explanation?: string }>;
+      code?: string;
+      starterCode?: string;
+      sampleCases?: Array<{ input: string; output: string; explanation?: string }>;
+      examplesSample?: Array<{ input: string; output: string; explanation?: string }>;
     }>;
   };
   if (!Array.isArray(parsed.questions) || parsed.questions.length !== params.count) {
@@ -712,57 +723,74 @@ ${
     );
   }
 
-  if (coding) {
-    for (const question of parsed.questions) {
-      if (
-        !question.text?.trim() ||
-        !question.codeStarter?.trim() ||
-        !Array.isArray(question.constraints) ||
-        question.constraints.length === 0 ||
-        !Array.isArray(question.examples) ||
-        question.examples.length === 0 ||
-        !question.examples.every(
-          (example) => example.input?.trim() && example.output?.trim()
-        )
-      ) {
-        throw new Error("Groq returned an incomplete coding or DSA question");
-      }
-    }
-  }
-
   return parsed.questions.map((question, index) => {
     const spec = questionSpecs[index];
+    const codeStarter =
+      question.codeStarter?.trim() ||
+      question.starterCode?.trim() ||
+      question.code?.trim();
+    const examples =
+      question.examples ||
+      question.sampleCases ||
+      question.examplesSample;
+    const validExamples = Array.isArray(examples)
+      ? examples.filter(
+          (example) =>
+            example.input?.trim() && example.output?.trim()
+        )
+      : [];
+
+    if (!question.text?.trim()) {
+      throw new Error("Groq returned a coding or DSA question without problem text");
+    }
+
+    const expectedPoints =
+      Array.isArray(question.expectedPoints) &&
+      question.expectedPoints.length > 0
+        ? question.expectedPoints
+        : ["Correctness", "Edge cases", "Time complexity", "Space complexity"];
+    const competencyTags =
+      Array.isArray(question.competencyTags) &&
+      question.competencyTags.length > 0
+        ? question.competencyTags
+        : [params.focus, "DSA"];
+
     return {
       question: {
         id: `${params.sessionId}-${index + 1}-${sessionSeed.slice(-8)}`,
         text: question.text,
-        topic: question.topic,
-        subtopic: question.subtopic,
+        topic: question.topic?.trim() || "Algorithms & Data Structures",
+        subtopic: question.subtopic?.trim() || params.focus,
         difficulty: spec.difficulty,
         stage: spec.stage,
-        expected_points: question.expectedPoints,
-        competency_tags: question.competencyTags,
+        expected_points: expectedPoints,
+        competency_tags: competencyTags,
         status: "draft",
         source: "generated",
         codeStarter: coding
-          ? question.codeStarter ||
+          ? codeStarter ||
             "function solution(input) {\n  // Implement your solution here\n}\n"
           : undefined,
         constraints: coding
-          ? question.constraints || [
+          ? (Array.isArray(question.constraints) &&
+              question.constraints.length > 0
+              ? question.constraints
+              : [
               "Handle empty and boundary inputs",
               "Optimize for the stated problem size",
               "Explain time and space complexity",
-            ]
+              ])
           : undefined,
         examples: coding
-          ? question.examples || [
+          ? (validExamples.length > 0
+              ? validExamples
+              : [
               {
                 input: "input = sample input",
                 output: "expected output",
                 explanation: "Validate the solution against the stated constraints.",
               },
-            ]
+              ])
           : undefined,
       },
       source: "generated",
