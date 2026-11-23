@@ -185,10 +185,8 @@ class QuestionPipeline:
         gemini: GeminiClient | None = None,
     ) -> None:
         self.ollama = ollama or OllamaClient()
-        self.gemini = gemini or GeminiClient()
-        self.provider = os.getenv("LLM_PROVIDER", "ollama").lower()
-        if self.provider not in ("ollama", "gemini"):
-            self.provider = "ollama"
+        self.gemini = gemini
+        self.provider = "ollama"
 
     def run(self, request: QuestionRequest) -> dict:
         domain = resolve_domain(request)
@@ -202,10 +200,7 @@ class QuestionPipeline:
             request.planned_question_count,
         )
 
-        if request.mode in ("auto", "generate") and (
-            (self.provider == "ollama" and self.ollama.reachable())
-            or (self.provider == "gemini" and self.gemini.reachable())
-        ):
+        if request.mode in ("auto", "generate") and self.ollama.reachable():
             for attempt in range(1, 3):
                 try:
                     question = self._generate(
@@ -241,18 +236,13 @@ class QuestionPipeline:
         )
 
     def doctor(self) -> dict:
-        if self.provider == "gemini":
-            reachable = self.gemini.reachable()
-            models = [self.gemini.model] if reachable else []
-            model = self.gemini.model
-        else:
-            reachable = self.ollama.reachable()
-            models = self.ollama.list_models() if reachable else []
-            model = self.ollama.model
+        reachable = self.ollama.reachable()
+        models = self.ollama.list_models() if reachable else []
+        model = self.ollama.model
         return {
             "provider": self.provider,
             "provider_reachable": reachable,
-            "ollama_reachable": reachable if self.provider == "ollama" else None,
+            "ollama_reachable": reachable,
             "ollama_url": self.ollama.base_url,
             "model": model,
             "model_installed": model in models,
@@ -336,20 +326,12 @@ Local style examples:
 {chr(10).join(f"- {text}" for text in style) or "- none"}
 
 {coding_contract}"""
-        if self.provider == "gemini":
-            result = self.gemini.generate_json(
-                system=system,
-                prompt=prompt,
-                schema=QUESTION_SCHEMA,
-                temperature=0.75 if attempt == 1 else 0.55,
-            )
-        else:
-            result = self.ollama.generate_json(
-                system=system,
-                prompt=prompt,
-                schema=QUESTION_SCHEMA,
-                temperature=0.75 if attempt == 1 else 0.55,
-            )
+        result = self.ollama.generate_json(
+            system=system,
+            prompt=prompt,
+            schema=QUESTION_SCHEMA,
+            temperature=0.75 if attempt == 1 else 0.55,
+        )
         data = result.data
         text = str(data["text"]).strip()
         if len(text) < 24:

@@ -25,19 +25,31 @@ npm run pipeline:python -- --mode=generate --focus="Kafka" --level=Senior --tags
 python -m unittest tests/test_python_question_pipeline.py
 ```
 
-### Production: Gemini
+### Local development: Ollama
+
+The local Python pipeline uses Ollama only:
+
+```env
+LLM_PROVIDER=ollama
+OLLAMA_BASE_URL=http://localhost:11434
+OLLAMA_MODEL=qwen2.5:7b
+```
+
+### Production: Groq
 
 Set these server-side variables on the hosting platform:
 
 ```env
-LLM_PROVIDER=gemini
-GEMINI_API_KEY=<your-server-side-key>
-GEMINI_MODEL=gemini-3.8-flash
-GEMINI_API_BASE_URL=https://generativelanguage.googleapis.com/v1beta
-GEMINI_MAX_RETRIES=4
-GEMINI_RETRY_BASE_MS=1000
-GEMINI_TIMEOUT_MS=120000
+LLM_PROVIDER=groq
+GROQ_API_KEY=<your-groq-api-key>
+GROQ_MODEL=llama-3.3-70b-versatile
+GROQ_API_BASE_URL=https://api.groq.com/openai/v1
+GROQ_MAX_RETRIES=4
+GROQ_RETRY_BASE_MS=1000
+GROQ_TIMEOUT_MS=120000
 ```
+
+Never prefix the Groq key with `NEXT_PUBLIC_`.
 
 Never prefix the Gemini key with `NEXT_PUBLIC_`. Production session creation uses
 the Gemini HTTP API directly; it does not require Python to be available on the

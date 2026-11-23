@@ -32,7 +32,7 @@ class GeminiClient:
     ) -> None:
         load_env()
         self.api_key = api_key or os.getenv("GEMINI_API_KEY", "")
-        self.model = model or os.getenv("GEMINI_MODEL", "gemini-3.8-flash")
+        self.model = model or os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
         self.base_url = (
             base_url
             or os.getenv(
