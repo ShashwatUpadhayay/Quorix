@@ -35,16 +35,6 @@ test("Groq coding sessions use the OpenAI-compatible response shape", async () =
                     stage: "icebreaker",
                     expectedPoints: ["Linear traversal", "Run tracking"],
                     competencyTags: ["arrays", "iteration"],
-                    codeStarter:
-                      "function solution(nums) {\n  // Write your solution\n}\n",
-                    constraints: ["nums.length <= 100000"],
-                    examples: [
-                      {
-                        input: "[1,3,5,4,7]",
-                        output: "3",
-                        explanation: "The longest run is [1,3,5].",
-                      },
-                    ],
                   },
                 ],
               }),
@@ -73,6 +63,8 @@ test("Groq coding sessions use the OpenAI-compatible response shape", async () =
       "Algorithms & Data Structures"
     );
     assert.ok(result.questions[0].codeStarter);
+    assert.ok(result.questions[0].constraints?.length);
+    assert.ok(result.questions[0].examples?.length);
   } finally {
     globalThis.fetch = previousFetch;
     if (previousNodeEnv === undefined) delete env.NODE_ENV;
