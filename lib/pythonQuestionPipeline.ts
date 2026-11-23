@@ -32,6 +32,19 @@ interface PythonQuestionResponse {
   cached?: boolean;
 }
 
+function toText(value: unknown): string {
+  if (typeof value === "string") return value.trim();
+  if (typeof value === "number" || typeof value === "boolean") {
+    return String(value);
+  }
+  if (value === null || value === undefined) return "";
+  try {
+    return JSON.stringify(value).trim();
+  } catch {
+    return String(value).trim();
+  }
+}
+
 function pythonExecutable(): string {
   return process.env.PYTHON_EXECUTABLE || "python";
 }
@@ -452,7 +465,9 @@ ${
         !Array.isArray(question.examples) ||
         question.examples.length === 0 ||
         !question.examples.every(
-          (example) => example.input?.trim() && example.output?.trim()
+          (example) =>
+            toText(example.input).length > 0 &&
+            toText(example.output).length > 0
         )
       ) {
         throw new Error(
@@ -708,13 +723,13 @@ ${
       stage: PythonQuestionResponse["question"]["stage"];
       expectedPoints: string[];
       competencyTags: string[];
-      codeStarter?: string;
-      constraints?: string[];
-      examples?: Array<{ input: string; output: string; explanation?: string }>;
-      code?: string;
-      starterCode?: string;
-      sampleCases?: Array<{ input: string; output: string; explanation?: string }>;
-      examplesSample?: Array<{ input: string; output: string; explanation?: string }>;
+      codeStarter?: unknown;
+      constraints?: unknown[];
+      examples?: Array<{ input: unknown; output: unknown; explanation?: unknown }>;
+      code?: unknown;
+      starterCode?: unknown;
+      sampleCases?: Array<{ input: unknown; output: unknown; explanation?: unknown }>;
+      examplesSample?: Array<{ input: unknown; output: unknown; explanation?: unknown }>;
     }>;
   };
   if (!Array.isArray(parsed.questions) || parsed.questions.length !== params.count) {
@@ -726,45 +741,55 @@ ${
   return parsed.questions.map((question, index) => {
     const spec = questionSpecs[index];
     const codeStarter =
-      question.codeStarter?.trim() ||
-      question.starterCode?.trim() ||
-      question.code?.trim();
+      toText(question.codeStarter) ||
+      toText(question.starterCode) ||
+      toText(question.code);
     const examples =
       question.examples ||
       question.sampleCases ||
       question.examplesSample;
     const validExamples = Array.isArray(examples)
-      ? examples.filter(
-          (example) =>
-            example.input?.trim() && example.output?.trim()
-        )
+      ? examples
+          .map((example) => ({
+            input: toText(example.input),
+            output: toText(example.output),
+            explanation: toText(example.explanation),
+          }))
+          .filter((example) => example.input && example.output)
       : [];
 
-    if (!question.text?.trim()) {
+    const problemText = toText(question.text);
+    if (!problemText) {
       throw new Error("Groq returned a coding or DSA question without problem text");
     }
 
     const expectedPoints =
       Array.isArray(question.expectedPoints) &&
       question.expectedPoints.length > 0
-        ? question.expectedPoints
+        ? question.expectedPoints.map(toText).filter(Boolean)
+        : ["Correctness", "Edge cases", "Time complexity", "Space complexity"];
+    const normalizedExpectedPoints =
+      expectedPoints.length > 0
+        ? expectedPoints
         : ["Correctness", "Edge cases", "Time complexity", "Space complexity"];
     const competencyTags =
       Array.isArray(question.competencyTags) &&
       question.competencyTags.length > 0
-        ? question.competencyTags
+        ? question.competencyTags.map(toText).filter(Boolean)
         : [params.focus, "DSA"];
+    const normalizedCompetencyTags =
+      competencyTags.length > 0 ? competencyTags : [params.focus, "DSA"];
 
     return {
       question: {
         id: `${params.sessionId}-${index + 1}-${sessionSeed.slice(-8)}`,
-        text: question.text,
-        topic: question.topic?.trim() || "Algorithms & Data Structures",
-        subtopic: question.subtopic?.trim() || params.focus,
+        text: problemText,
+        topic: toText(question.topic) || "Algorithms & Data Structures",
+        subtopic: toText(question.subtopic) || params.focus,
         difficulty: spec.difficulty,
         stage: spec.stage,
-        expected_points: expectedPoints,
-        competency_tags: competencyTags,
+        expected_points: normalizedExpectedPoints,
+        competency_tags: normalizedCompetencyTags,
         status: "draft",
         source: "generated",
         codeStarter: coding
@@ -774,7 +799,7 @@ ${
         constraints: coding
           ? (Array.isArray(question.constraints) &&
               question.constraints.length > 0
-              ? question.constraints
+              ? question.constraints.map(toText).filter(Boolean)
               : [
               "Handle empty and boundary inputs",
               "Optimize for the stated problem size",
