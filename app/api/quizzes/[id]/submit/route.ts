@@ -4,7 +4,7 @@ import {
   getQuizzesCollection,
   getQuizAttemptsCollection,
   getDatabase,
-  QuizAttemptDoc,
+  QuizQuestion,
 } from "@/lib/mongodb";
 import { ObjectId } from "mongodb";
 
@@ -16,7 +16,7 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
   try {
     const { id } = await params;
     const user = await getCurrentUser();
-    if (!user) {
+    if (!user || user.role !== "candidate" || !user._id) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
@@ -32,43 +32,60 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
     }
 
     const quizIdStr = quiz._id?.toString() || id;
-    const candidateId = user._id?.toString() || "";
+    const candidateId = user._id.toString();
 
-    const attemptsCol = await getQuizAttemptsCollection();
-    const previousAttempts = await attemptsCol
-      .find({ quizId: quizIdStr, candidateId })
-      .toArray();
+    const body = await req.json();
+    const {
+      answers = {},
+      attemptId,
+      status = "completed",
+    } = body as {
+      answers: Record<string, string>;
+      attemptId?: string;
+      status?: "completed" | "timed_out";
+    };
 
-    const previousCount = previousAttempts.length;
-
-    // Check maximum attempts limit
-    if (quiz.maxAttempts > 0 && previousCount >= quiz.maxAttempts) {
+    if (typeof attemptId !== "string" || !ObjectId.isValid(attemptId)) {
       return NextResponse.json(
-        {
-          error: `Maximum attempts limit (${quiz.maxAttempts}) reached for this quiz.`,
-        },
-        { status: 403 }
+        { error: "A valid quiz attempt is required to submit" },
+        { status: 400 }
       );
     }
 
-    const body = await req.json();
-    const { answers = {}, questionOrder = [] } = body as {
-      answers: Record<string, string>;
-      questionOrder: string[];
+    const attemptsCol = await getQuizAttemptsCollection();
+    const attemptQuery = {
+      _id: new ObjectId(attemptId) as unknown as string,
+      quizId: quizIdStr,
+      candidateId,
+      status: "in_progress" as const,
     };
+    const attempt = await attemptsCol.findOne(attemptQuery);
+    if (!attempt) {
+      return NextResponse.json(
+        { error: "This quiz attempt is no longer active" },
+        { status: 409 }
+      );
+    }
 
-    const questionsMap = new Map(
-      (quiz.questions || []).map((q) => [q.id, q])
-    );
+    if (
+      !answers ||
+      typeof answers !== "object" ||
+      Array.isArray(answers)
+    ) {
+      return NextResponse.json(
+        { error: "Answers must be provided as an object" },
+        { status: 400 }
+      );
+    }
 
     let score = 0;
     const total = quiz.questions?.length || 0;
+    const questionsMap = new Map((quiz.questions || []).map((q) => [q.id, q]));
 
-    const breakdown = (questionOrder.length > 0
-      ? questionOrder.map((qid) => questionsMap.get(qid)).filter(Boolean)
-      : quiz.questions
-    ).map((q) => {
-      if (!q) return null;
+    const orderedQuestions = attempt.questionOrder
+      .map((questionId) => questionsMap.get(questionId))
+      .filter((question): question is QuizQuestion => question !== undefined);
+    const breakdown = orderedQuestions.map((q) => {
       const selected = answers[q.id] || "";
       const correct = q.correctAnswer || "";
 
@@ -89,28 +106,40 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
         isCorrect: isMatch,
         explanation: q.explanation,
       };
-    }).filter(Boolean);
+    });
 
     const percentage = total > 0 ? Math.round((score / total) * 100) : 0;
-    const currentAttemptNumber = previousCount + 1;
-
-    const newAttempt: Omit<QuizAttemptDoc, "_id"> = {
-      quizId: quizIdStr,
-      candidateId,
-      candidateName: user.name || "Candidate",
-      candidateEmail: user.email,
-      attemptNumber: currentAttemptNumber,
-      questionOrder: questionOrder.length > 0 ? questionOrder : (quiz.questions || []).map((q) => q.id),
-      answers,
-      score,
-      total,
-      percentage,
-      submittedAt: new Date(),
-    };
-
-    const insertResult = await attemptsCol.insertOne(
-      newAttempt as QuizAttemptDoc
+    const submittedAt = new Date();
+    const startedAt = attempt.startedAt || submittedAt;
+    const timeSpentSeconds = Math.max(
+      0,
+      Math.floor((submittedAt.getTime() - startedAt.getTime()) / 1000)
     );
+    const timeLimitMinutes = quiz.timeLimitMinutes || 0;
+    const timedOut =
+      status === "timed_out" ||
+      (timeLimitMinutes > 0 &&
+        timeSpentSeconds >= timeLimitMinutes * 60);
+    const attemptStatus = timedOut ? "timed_out" : "completed";
+
+    const updateResult = await attemptsCol.updateOne(attemptQuery, {
+      $set: {
+        answers,
+        score,
+        total,
+        percentage,
+        status: attemptStatus,
+        timeSpentSeconds,
+        breakdown,
+        submittedAt,
+      },
+    });
+    if (updateResult.modifiedCount !== 1) {
+      return NextResponse.json(
+        { error: "This quiz attempt was already submitted" },
+        { status: 409 }
+      );
+    }
 
     // Record activity log
     try {
@@ -119,29 +148,33 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
         userId: candidateId,
         userName: user.name,
         userEmail: user.email,
-        action: `Completed Quiz: ${quiz.title}`,
+        action: `${attemptStatus === "timed_out" ? "Timed Out" : "Completed"} Quiz: ${quiz.title}`,
         category: "board",
-        detail: `Score: ${score}/${total} (${percentage}%) • Attempt ${currentAttemptNumber}${quiz.maxAttempts > 0 ? ` of ${quiz.maxAttempts}` : ""}`,
+        detail: `Score: ${score}/${total} (${percentage}%) • Attempt ${attempt.attemptNumber}${quiz.maxAttempts > 0 ? ` of ${quiz.maxAttempts}` : ""}`,
         createdAt: new Date(),
       });
     } catch {
       // Non-blocking log
     }
 
+    const attemptCount = await attemptsCol.countDocuments({
+      quizId: quizIdStr,
+      candidateId,
+    });
     const remainingAttempts =
-      quiz.maxAttempts > 0
-        ? Math.max(0, quiz.maxAttempts - currentAttemptNumber)
-        : null;
+      quiz.maxAttempts > 0 ? Math.max(0, quiz.maxAttempts - attemptCount) : null;
 
     return NextResponse.json(
       {
         success: true,
-        attemptId: insertResult.insertedId.toString(),
+        attemptId,
         score,
         total,
         percentage,
         breakdown,
-        attemptNumber: currentAttemptNumber,
+        attemptNumber: attempt.attemptNumber,
+        status: attemptStatus,
+        timeSpentSeconds,
         maxAttempts: quiz.maxAttempts,
         remainingAttempts,
       },
