@@ -29,17 +29,26 @@ interface ExpertAttempt {
   answers: Record<string, string>;
 }
 
-interface LeaderboardEntry {
+interface CandidateAttemptSummary {
+  attemptId: string;
+  attemptNumber: number;
+  score: number;
+  total: number;
+  percentage: number;
+  status: AttemptStatus;
+  timeSpentSeconds: number | null;
+  submittedAt: string | null;
+  breakdown: QuestionResponse[];
+}
+
+interface ExpertLeaderboardEntry {
   rank: number;
   candidateName: string;
   attemptNumber: number;
   score: number;
   total: number;
   percentage: number;
-  status: "completed" | "timed_out";
   timeSpentSeconds: number | null;
-  submittedAt: string | null;
-  isCurrentUser: boolean;
 }
 
 interface QuizResultsModalProps {
@@ -74,7 +83,12 @@ export default function QuizResultsModal({
   onClose,
 }: QuizResultsModalProps) {
   const [attempts, setAttempts] = useState<ExpertAttempt[]>([]);
-  const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
+  const [candidateAttempts, setCandidateAttempts] = useState<
+    CandidateAttemptSummary[]
+  >([]);
+  const [expertLeaderboard, setExpertLeaderboard] = useState<
+    ExpertLeaderboardEntry[]
+  >([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [expandedAttempt, setExpandedAttempt] = useState<string | null>(null);
@@ -93,8 +107,11 @@ export default function QuizResultsModal({
         if (!active) return;
         if (view === "expert" && Array.isArray(data.attempts)) {
           setAttempts(data.attempts);
-        } else if (view === "candidate" && Array.isArray(data.leaderboard)) {
-          setLeaderboard(data.leaderboard);
+          setExpertLeaderboard(
+            Array.isArray(data.leaderboard) ? data.leaderboard : []
+          );
+        } else if (view === "candidate" && Array.isArray(data.attempts)) {
+          setCandidateAttempts(data.attempts);
         } else {
           throw new Error("The results response was incomplete.");
         }
@@ -132,7 +149,9 @@ export default function QuizResultsModal({
           <div>
             <div className="mb-1 flex items-center gap-2 text-xs font-mono uppercase text-[#6E6B65]">
               <Award className="h-4 w-4 text-[#1F7A55]" />
-              {view === "expert" ? "Quiz responses" : "Quiz leaderboard"}
+              {view === "expert"
+                ? "Quiz responses & leaderboard"
+                : "Your attempt summary"}
             </div>
             <h2
               id="quiz-results-title"
@@ -167,7 +186,53 @@ export default function QuizResultsModal({
               No candidates have started this quiz yet.
             </div>
           ) : (
-            <div className="space-y-3">
+            <div className="space-y-5">
+              <section className="rounded-lg border border-[#E5E2DA] bg-white p-4">
+                <h3 className="mb-3 text-xs font-mono font-semibold uppercase text-[#6E6B65]">
+                  Best score per candidate
+                </h3>
+                {expertLeaderboard.length === 0 ? (
+                  <p className="text-xs text-[#8E8B84]">
+                    The leaderboard will appear after a candidate submits an attempt.
+                  </p>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full min-w-[420px] text-left text-xs">
+                      <thead className="text-[10px] font-mono uppercase text-[#8E8B84]">
+                        <tr>
+                          <th className="pb-2 pr-3">Rank</th>
+                          <th className="pb-2 pr-3">Candidate</th>
+                          <th className="pb-2 pr-3">Score</th>
+                          <th className="pb-2">Time</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-[#E5E2DA]">
+                        {expertLeaderboard.map((entry) => (
+                          <tr key={`${entry.rank}-${entry.candidateName}`}>
+                            <td className="py-2 pr-3 font-mono font-bold text-[#1A1918]">
+                              #{entry.rank}
+                            </td>
+                            <td className="py-2 pr-3 font-medium text-[#1A1918]">
+                              {entry.candidateName}
+                            </td>
+                            <td className="py-2 pr-3 font-mono text-[#1F7A55]">
+                              {entry.score}/{entry.total} · {entry.percentage}%
+                            </td>
+                            <td className="py-2 text-[#6E6B65]">
+                              {formatDuration(entry.timeSpentSeconds)}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </section>
+
+              <h3 className="text-xs font-mono font-semibold uppercase text-[#6E6B65]">
+                Candidate attempts &amp; responses
+              </h3>
+              <div className="space-y-3">
               {attempts.map((attempt) => (
                 <article
                   key={attempt.attemptId}
@@ -260,57 +325,90 @@ export default function QuizResultsModal({
                   )}
                 </article>
               ))}
+              </div>
             </div>
           )
-        ) : leaderboard.length === 0 ? (
+        ) : candidateAttempts.length === 0 ? (
           <div className="rounded-lg border border-[#E5E2DA] bg-white p-8 text-center text-sm text-[#6E6B65]">
-            Scores will appear here after a candidate submits an attempt.
+            No attempts have been submitted for this quiz yet. Your score and answer review will appear here after you finish an attempt.
           </div>
         ) : (
-          <div className="overflow-x-auto rounded-lg border border-[#E5E2DA] bg-white">
-            <table className="w-full min-w-[560px] text-left text-xs">
-              <thead className="bg-[#F2EFE9] font-mono uppercase text-[#6E6B65]">
-                <tr>
-                  <th className="px-4 py-3">Rank</th>
-                  <th className="px-4 py-3">Candidate</th>
-                  <th className="px-4 py-3">Score</th>
-                  <th className="px-4 py-3">Time</th>
-                  <th className="px-4 py-3">Submitted</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-[#E5E2DA]">
-                {leaderboard.map((entry) => (
-                  <tr
-                    key={`${entry.rank}-${entry.candidateName}-${entry.attemptNumber}`}
-                    className={entry.isCurrentUser ? "bg-[#EDF3EC]/70" : ""}
-                  >
-                    <td className="px-4 py-3 font-mono font-bold text-[#1A1918]">
-                      #{entry.rank}
-                    </td>
-                    <td className="px-4 py-3 font-medium text-[#1A1918]">
-                      {entry.candidateName}
-                      {entry.isCurrentUser && (
-                        <span className="ml-2 text-[10px] font-mono uppercase text-[#1F7A55]">
-                          You
-                        </span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3 font-mono font-bold text-[#1A1918]">
-                      {entry.score}/{entry.total} · {entry.percentage}%
-                    </td>
-                    <td className="px-4 py-3 text-[#55524C]">
-                      {formatDuration(entry.timeSpentSeconds)}
-                    </td>
-                    <td className="px-4 py-3 text-[#6E6B65]">
-                      {formatDate(entry.submittedAt)}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            <p className="border-t border-[#E5E2DA] px-4 py-2 text-[11px] text-[#8E8B84]">
-              Each candidate is shown once, using their highest score. Ties are ranked by completion time.
-            </p>
+          <div className="space-y-4">
+            {candidateAttempts.map((attempt) => (
+              <article
+                key={attempt.attemptId}
+                className="rounded-lg border border-[#E5E2DA] bg-white p-4 sm:p-5"
+              >
+                <header className="flex flex-col justify-between gap-3 border-b border-[#E5E2DA] pb-3 sm:flex-row sm:items-center">
+                  <div>
+                    <h3 className="text-sm font-bold text-[#1A1918]">
+                      Attempt {attempt.attemptNumber}
+                    </h3>
+                    <p className="mt-1 text-[11px] text-[#6E6B65]">
+                      {formatDate(attempt.submittedAt)} ·{" "}
+                      {formatDuration(attempt.timeSpentSeconds)}
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="rounded-md bg-[#F2EFE9] px-2.5 py-1 text-xs font-medium text-[#6E6B65]">
+                      {statusLabel[attempt.status]}
+                    </span>
+                    {attempt.status === "completed" ||
+                    attempt.status === "timed_out" ? (
+                      <span className="rounded-md border border-[#CBE4D6] bg-[#EDF3EC] px-2.5 py-1 font-mono text-sm font-bold text-[#1F7A55]">
+                        {attempt.score}/{attempt.total} correct · {attempt.percentage}%
+                      </span>
+                    ) : (
+                      <span className="text-xs text-[#8E8B84]">Not scored</span>
+                    )}
+                  </div>
+                </header>
+
+                {attempt.breakdown.length === 0 ? (
+                  <p className="pt-3 text-xs text-[#6E6B65]">
+                    No answers were recorded for this attempt.
+                  </p>
+                ) : (
+                  <div className="space-y-3 pt-3">
+                    {attempt.breakdown.map((response, index) => (
+                      <div
+                        key={response.questionId}
+                        className="rounded-md bg-[#FAF8F5] p-3 text-xs"
+                      >
+                        <div className="font-semibold text-[#1A1918]">
+                          Q{index + 1}. {response.question}
+                        </div>
+                        <div className="mt-2 grid gap-1.5 sm:grid-cols-2">
+                          <p className="text-[#55524C]">
+                            Your answer:{" "}
+                            <span
+                              className={
+                                response.isCorrect
+                                  ? "font-semibold text-[#1F7A55]"
+                                  : "font-semibold text-[#991B1B]"
+                              }
+                            >
+                              {response.selectedAnswer || "Not answered"}
+                            </span>
+                          </p>
+                          <p className="text-[#55524C]">
+                            Correct answer:{" "}
+                            <span className="font-semibold text-[#1F7A55]">
+                              {response.correctAnswer}
+                            </span>
+                          </p>
+                        </div>
+                        {response.explanation && (
+                          <p className="mt-2 border-t border-[#E5E2DA] pt-2 text-[#6E6B65]">
+                            {response.explanation}
+                          </p>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </article>
+            ))}
           </div>
         )}
 
@@ -318,8 +416,8 @@ export default function QuizResultsModal({
           <div className="mt-4 flex items-center gap-1.5 text-[11px] text-[#8E8B84]">
             <CheckCircle2 className="h-3.5 w-3.5" />
             {view === "expert"
-              ? `${attempts.length} attempt${attempts.length === 1 ? "" : "s"} recorded`
-              : `${leaderboard.length} candidate${leaderboard.length === 1 ? "" : "s"} ranked`}
+              ? `${attempts.length} attempt${attempts.length === 1 ? "" : "s"} recorded · ${expertLeaderboard.length} candidate${expertLeaderboard.length === 1 ? "" : "s"} ranked`
+              : `${candidateAttempts.length} of your attempt${candidateAttempts.length === 1 ? "" : "s"} shown`}
           </div>
         )}
       </section>

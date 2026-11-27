@@ -1527,7 +1527,7 @@ export default function CandidateWorkspace() {
                                       className="inline-flex items-center gap-1.5 rounded-lg border border-[#D5D1C7] bg-white px-3 py-2 text-xs font-medium text-[#1A1918] hover:bg-[#FAF8F5]"
                                     >
                                       <Award className="h-3.5 w-3.5 text-[#1F7A55]" />
-                                      Leaderboard
+                                      Attempt summary
                                     </button>
                                     <button
                                       onClick={() => handleStartQuiz(q._id)}
@@ -1954,7 +1954,6 @@ export default function CandidateWorkspace() {
                     {/* Telemetry Strip: Jumbled notice + Progress */}
                     <div className="space-y-2">
                       <div className="flex items-center justify-between text-xs font-mono text-[#6E6B65]">
-                      
                         <span>
                           Question {activeQuizQuestionIdx + 1} of {activeQuizModal.totalQuestions}
                         </span>
