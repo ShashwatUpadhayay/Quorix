@@ -27,6 +27,7 @@ import {
   Check,
 } from "lucide-react";
 import UserProfileView from "@/components/UserProfileView";
+import QuizResultsModal from "@/components/QuizResultsModal";
 import type { InterviewConfig, SkillItem, QuizQuestion, DifficultyTier } from "@/lib/mongodb";
 import { generateAdaptiveExpertSuggestions } from "@/lib/adaptiveEngine";
 import { parseQuizInput, SAMPLE_QUIZ_CSV } from "@/lib/quizParser";
@@ -56,6 +57,7 @@ interface HostedQuizItem {
   difficulty: DifficultyTier;
   description: string;
   maxAttempts: number;
+  timeLimitMinutes: number;
   totalQuestions: number;
   createdAt: string;
   totalAttempts: number;
@@ -128,12 +130,14 @@ export default function ExpertWorkspace() {
   const [quizzes, setQuizzes] = useState<HostedQuizItem[]>([]);
   const [loadingQuizzes, setLoadingQuizzes] = useState(false);
   const [showCreateQuizModal, setShowCreateQuizModal] = useState(false);
+  const [resultsQuiz, setResultsQuiz] = useState<HostedQuizItem | null>(null);
 
   // Quiz Creator Form State
   const [quizTitle, setQuizTitle] = useState("");
   const [quizTopic, setQuizTopic] = useState("Distributed Systems");
   const [quizDifficulty, setQuizDifficulty] = useState<DifficultyTier>("Senior");
   const [quizMaxAttempts, setQuizMaxAttempts] = useState<number>(3); // 'n' attempts, 0 = unlimited
+  const [quizTimeLimitMinutes, setQuizTimeLimitMinutes] = useState(0);
   const [rawQuizInput, setRawQuizInput] = useState("");
   const [parsedQuestions, setParsedQuestions] = useState<QuizQuestion[]>([]);
   const [parseErrors, setParseErrors] = useState<string[]>([]);
@@ -324,6 +328,7 @@ export default function ExpertWorkspace() {
           difficulty: quizDifficulty,
           description: `Calibrated for ${quizDifficulty} level candidates. Questions randomized dynamically per attempt.`,
           maxAttempts: quizMaxAttempts,
+          timeLimitMinutes: quizTimeLimitMinutes,
           questions: parsedQuestions,
         }),
       });
@@ -343,6 +348,7 @@ export default function ExpertWorkspace() {
       // Reset form
       setQuizTitle("");
       setRawQuizInput("");
+      setQuizTimeLimitMinutes(0);
       setParsedQuestions([]);
       setParseErrors([]);
       setShowCreateQuizModal(false);
@@ -414,8 +420,8 @@ export default function ExpertWorkspace() {
       label: "Expert Profile",
       desc: "Dossier & daily activity",
       icon: Award,
-      disabled: true,
-      comingSoon: true,
+      disabled: false,
+      comingSoon: false,
     },
   ] as const;
 
@@ -821,13 +827,24 @@ export default function ExpertWorkspace() {
                               </div>
 
                               <div className="pt-3 border-t border-[#E5E2DA] space-y-3">
-                                <div className="grid grid-cols-3 gap-2 text-center">
+                                <div className="grid grid-cols-2 gap-2 text-center sm:grid-cols-4">
                                   <div className="rounded-md border border-[#E5E2DA] bg-[#FAF8F5] p-2">
                                     <div className="text-[10px] font-mono text-[#8E8B84] uppercase">
                                       Questions
                                     </div>
                                     <div className="text-xs font-bold font-mono text-[#1A1918] mt-0.5">
                                       {q.totalQuestions}
+                                    </div>
+                                  </div>
+
+                                  <div className="rounded-md border border-[#E5E2DA] bg-[#FAF8F5] p-2">
+                                    <div className="text-[10px] font-mono text-[#8E8B84] uppercase">
+                                      Time Limit
+                                    </div>
+                                    <div className="text-xs font-bold font-mono text-[#1A1918] mt-0.5">
+                                      {q.timeLimitMinutes > 0
+                                        ? `${q.timeLimitMinutes} min`
+                                        : "None"}
                                     </div>
                                   </div>
 
@@ -850,16 +867,20 @@ export default function ExpertWorkspace() {
                                   </div>
                                 </div>
 
-                                <div className="flex items-center justify-between text-[11px] font-mono text-[#6E6B65]">
-                                  <div className="flex items-center gap-1">
-                                    <Shuffle className="w-3.5 h-3.5 text-[#1F7A55]" />
-                                    <span>Jumbled sequence enabled</span>
-                                  </div>
+                                <div className="flex flex-col gap-2 text-[11px] font-mono text-[#6E6B65] sm:flex-row sm:items-center sm:justify-between">
                                   {q.averageScore !== null && (
                                     <span className="font-semibold text-[#1A1918]">
                                       Avg: {q.averageScore}%
                                     </span>
                                   )}
+                                  <button
+                                    type="button"
+                                    onClick={() => setResultsQuiz(q)}
+                                    className="inline-flex items-center gap-1.5 self-start rounded-md border border-[#D5D1C7] bg-[#FFFFFF] px-2.5 py-1.5 font-sans text-xs font-medium text-[#1A1918] hover:bg-[#FAF8F5]"
+                                  >
+                                    <Award className="h-3.5 w-3.5 text-[#1F7A55]" />
+                                    View responses &amp; leaderboard
+                                  </button>
                                 </div>
                               </div>
                             </div>
@@ -1253,6 +1274,33 @@ export default function ExpertWorkspace() {
                         ))}
                       </div>
                     </div>
+
+                    <div className="space-y-1.5 sm:col-span-2">
+                      <label
+                        htmlFor="quiz-time-limit"
+                        className="text-xs font-bold font-mono uppercase text-[#1A1918]"
+                      >
+                        Time Limit
+                      </label>
+                      <div className="flex items-center gap-3">
+                        <input
+                          id="quiz-time-limit"
+                          type="number"
+                          min={0}
+                          step={1}
+                          value={quizTimeLimitMinutes}
+                          onChange={(event) =>
+                            setQuizTimeLimitMinutes(
+                              Math.max(0, Number(event.target.value) || 0)
+                            )
+                          }
+                          className="w-32 rounded-lg border border-[#D5D1C7] bg-[#FAF8F5] px-3.5 py-2.5 text-xs text-[#1A1918] focus-visible:outline-2 focus-visible:outline-[#1A1918]"
+                        />
+                        <span className="text-xs text-[#6E6B65]">
+                          minutes · enter 0 for no time limit
+                        </span>
+                      </div>
+                    </div>
                   </div>
 
                   {/* Step 2: Upload CSV / Doc / Text */}
@@ -1414,6 +1462,15 @@ Explanation: Standard distributed systems principle.`}
           </div>
         )}
       </AnimatePresence>
+
+      {resultsQuiz && (
+        <QuizResultsModal
+          quizId={resultsQuiz._id}
+          quizTitle={resultsQuiz.title}
+          view="expert"
+          onClose={() => setResultsQuiz(null)}
+        />
+      )}
     </div>
   );
 }

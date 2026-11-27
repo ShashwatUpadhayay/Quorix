@@ -35,37 +35,87 @@ export async function GET(req: NextRequest, { params }: RouteParams) {
 
     // If candidate is initiating a quiz attempt
     if (isTaking) {
-      const attemptsCol = await getQuizAttemptsCollection();
-      const candidateId = user._id?.toString() || "";
-      const quizIdStr = quiz._id?.toString() || id;
-
-      const previousAttempts = await attemptsCol
-        .find({ quizId: quizIdStr, candidateId })
-        .toArray();
-
-      const attemptCount = previousAttempts.length;
-
-      // Check attempt constraint
-      if (quiz.maxAttempts > 0 && attemptCount >= quiz.maxAttempts) {
+      if (user.role !== "candidate" || !user._id) {
         return NextResponse.json(
-          {
-            error: `Maximum attempts reached (${quiz.maxAttempts}/${quiz.maxAttempts})`,
-            attemptCount,
-            maxAttempts: quiz.maxAttempts,
-          },
+          { error: "Only candidates can start a quiz attempt" },
           { status: 403 }
         );
       }
 
-      // Jumble / randomize the question order using Fisher-Yates
-      const jumbledQuestions = shuffleQuestions(quiz.questions || []).map((q) => {
-        // Strip out the correct answer & explanation so candidate cannot inspect client payloads
-        return {
-          id: q.id,
-          question: q.question,
-          options: q.options,
-        };
+      const attemptsCol = await getQuizAttemptsCollection();
+      const quizIdStr = quiz._id?.toString() || id;
+      const candidateId = user._id.toString();
+
+      let activeAttempt = await attemptsCol.findOne({
+        quizId: quizIdStr,
+        candidateId,
+        status: "in_progress",
       });
+
+      if (!activeAttempt) {
+        const attemptCount = await attemptsCol.countDocuments({
+          quizId: quizIdStr,
+          candidateId,
+        });
+
+        if (quiz.maxAttempts > 0 && attemptCount >= quiz.maxAttempts) {
+          return NextResponse.json(
+            {
+              error: `Maximum attempts reached (${quiz.maxAttempts}/${quiz.maxAttempts})`,
+              attemptCount,
+              maxAttempts: quiz.maxAttempts,
+            },
+            { status: 403 }
+          );
+        }
+
+        const startedAt = new Date();
+        const questionOrder = shuffleQuestions(quiz.questions || []).map(
+          (question) => question.id
+        );
+        const insertResult = await attemptsCol.insertOne({
+          quizId: quizIdStr,
+          candidateId,
+          candidateName: user.name || "Candidate",
+          candidateEmail: user.email,
+          attemptNumber: attemptCount + 1,
+          questionOrder,
+          answers: {},
+          score: 0,
+          total: quiz.questions?.length || 0,
+          percentage: 0,
+          status: "in_progress",
+          startedAt,
+        });
+
+        activeAttempt = {
+          _id: insertResult.insertedId,
+          quizId: quizIdStr,
+          candidateId,
+          candidateName: user.name || "Candidate",
+          candidateEmail: user.email,
+          attemptNumber: attemptCount + 1,
+          questionOrder,
+          answers: {},
+          score: 0,
+          total: quiz.questions?.length || 0,
+          percentage: 0,
+          status: "in_progress",
+          startedAt,
+        };
+      }
+
+      const questionsById = new Map(
+        (quiz.questions || []).map((question) => [question.id, question])
+      );
+      const jumbledQuestions = activeAttempt.questionOrder
+        .map((questionId) => questionsById.get(questionId))
+        .filter((question) => question !== undefined)
+        .map((question) => ({
+          id: question.id,
+          question: question.question,
+          options: question.options,
+        }));
 
       return NextResponse.json(
         {
@@ -76,12 +126,29 @@ export async function GET(req: NextRequest, { params }: RouteParams) {
             difficulty: quiz.difficulty,
             description: quiz.description,
             maxAttempts: quiz.maxAttempts,
-            attemptNumber: attemptCount + 1,
+            timeLimitMinutes: quiz.timeLimitMinutes || 0,
+            attemptId: activeAttempt._id?.toString(),
+            startedAt: activeAttempt.startedAt,
+            attemptNumber: activeAttempt.attemptNumber,
             totalQuestions: jumbledQuestions.length,
             questions: jumbledQuestions,
           },
         },
         { status: 200 }
+      );
+    }
+
+    if (user.role === "candidate") {
+      return NextResponse.json(
+        { error: "Candidate quiz details are only available when starting an attempt" },
+        { status: 403 }
+      );
+    }
+
+    if (user.role !== "admin" && quiz.expertId !== user._id?.toString()) {
+      return NextResponse.json(
+        { error: "You can only view quizzes you authored" },
+        { status: 403 }
       );
     }
 

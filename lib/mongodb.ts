@@ -318,6 +318,7 @@ export interface QuizDoc {
   difficulty: DifficultyTier;
   description: string;
   maxAttempts: number; // e.g. 1, 2, 3... 0 represents unlimited attempts
+  timeLimitMinutes?: number; // 0 or undefined represents untimed
   questions: QuizQuestion[];
   totalQuestions: number;
   createdAt: Date;
@@ -327,6 +328,16 @@ export interface QuizDoc {
 /**
  * Candidate Quiz Attempt Document Schema
  */
+export interface QuizAttemptQuestionReview {
+  questionId: string;
+  question: string;
+  options: string[];
+  selectedAnswer: string;
+  correctAnswer: string;
+  isCorrect: boolean;
+  explanation?: string;
+}
+
 export interface QuizAttemptDoc {
   _id?: string;
   quizId: string;
@@ -339,7 +350,11 @@ export interface QuizAttemptDoc {
   score: number;
   total: number;
   percentage: number;
-  submittedAt: Date;
+  status: "in_progress" | "completed" | "abandoned" | "timed_out";
+  timeSpentSeconds?: number;
+  breakdown?: QuizAttemptQuestionReview[];
+  startedAt?: Date;
+  submittedAt?: Date;
 }
 
 /**

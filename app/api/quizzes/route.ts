@@ -18,7 +18,12 @@ export async function GET() {
     const attemptsCol = await getQuizAttemptsCollection();
 
     // Fetch active quizzes sorted by newest
-    const quizzes = await quizzesCol.find({}).sort({ createdAt: -1 }).toArray();
+    const quizFilter =
+      user.role === "expert" ? { expertId: user._id?.toString() } : {};
+    const quizzes = await quizzesCol
+      .find(quizFilter)
+      .sort({ createdAt: -1 })
+      .toArray();
 
     // If user is candidate, attach user's specific attempt counts and best scores
     if (user.role === "candidate" && user._id) {
@@ -32,7 +37,10 @@ export async function GET() {
         const myAttempts = userAttempts.filter(
           (att) => att.quizId === quizIdStr
         );
-        const bestScore = myAttempts.reduce(
+        const scoredAttempts = myAttempts.filter(
+          (attempt) => attempt.status === "completed" || attempt.status === "timed_out"
+        );
+        const bestScore = scoredAttempts.reduce(
           (max, att) => Math.max(max, att.percentage),
           0
         );
@@ -50,10 +58,11 @@ export async function GET() {
           difficulty: q.difficulty,
           description: q.description,
           maxAttempts: q.maxAttempts,
+          timeLimitMinutes: q.timeLimitMinutes || 0,
           totalQuestions: q.totalQuestions || q.questions?.length || 0,
           createdAt: q.createdAt,
           candidateAttemptsCount: myAttempts.length,
-          bestScore: myAttempts.length > 0 ? bestScore : null,
+          bestScore: scoredAttempts.length > 0 ? bestScore : null,
           remainingAttempts,
           canAttempt: q.maxAttempts === 0 || myAttempts.length < q.maxAttempts,
         };
@@ -69,11 +78,14 @@ export async function GET() {
       const quizIdStr = q._id?.toString() || "";
       const qAttempts = allAttempts.filter((att) => att.quizId === quizIdStr);
       const totalAttempts = qAttempts.length;
+      const scoredAttempts = qAttempts.filter(
+        (attempt) => attempt.status === "completed" || attempt.status === "timed_out"
+      );
       const avgScore =
-        totalAttempts > 0
+        scoredAttempts.length > 0
           ? Math.round(
-              qAttempts.reduce((acc, curr) => acc + curr.percentage, 0) /
-                totalAttempts
+              scoredAttempts.reduce((acc, curr) => acc + curr.percentage, 0) /
+                scoredAttempts.length
             )
           : null;
 
@@ -87,6 +99,7 @@ export async function GET() {
         difficulty: q.difficulty,
         description: q.description,
         maxAttempts: q.maxAttempts,
+        timeLimitMinutes: q.timeLimitMinutes || 0,
         totalQuestions: q.totalQuestions || q.questions?.length || 0,
         createdAt: q.createdAt,
         totalAttempts,
@@ -120,8 +133,15 @@ export async function POST(req: NextRequest) {
     }
 
     const body = await req.json();
-    const { title, topic, difficulty, description, maxAttempts, questions } =
-      body;
+    const {
+      title,
+      topic,
+      difficulty,
+      description,
+      maxAttempts,
+      timeLimitMinutes,
+      questions,
+    } = body;
 
     if (!title || !title.trim()) {
       return NextResponse.json(
@@ -162,6 +182,12 @@ export async function POST(req: NextRequest) {
 
     const maxAttemptsNum =
       typeof maxAttempts === "number" && maxAttempts >= 0 ? maxAttempts : 1;
+    const timeLimitNum =
+      typeof timeLimitMinutes === "number" &&
+      Number.isInteger(timeLimitMinutes) &&
+      timeLimitMinutes >= 0
+        ? timeLimitMinutes
+        : 0;
 
     const newQuiz: Omit<QuizDoc, "_id"> = {
       expertId: user._id || "expert_id",
@@ -172,6 +198,7 @@ export async function POST(req: NextRequest) {
       difficulty: (difficulty as DifficultyTier) || "Intermediate",
       description: description?.trim() || "",
       maxAttempts: maxAttemptsNum,
+      timeLimitMinutes: timeLimitNum,
       questions: questions.map((q, idx) => ({
         id: q.id || `q_${Date.now()}_${idx + 1}`,
         question: q.question.trim(),

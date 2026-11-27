@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useMemo, useCallback } from "react";
+import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
@@ -20,14 +20,15 @@ import {
   ChevronDown,
   RotateCcw,
   Sparkles,
+  Award,
   HelpCircle,
   Shuffle,
   FileText,
   RefreshCw,
-  Radio,
   Loader2,
 } from "lucide-react";
 import UserProfileView from "@/components/UserProfileView";
+import QuizResultsModal from "@/components/QuizResultsModal";
 import type {
   DifficultyTier,
   InterviewConfig,
@@ -54,6 +55,7 @@ interface CandidateQuizItem {
   difficulty: DifficultyTier;
   description: string;
   maxAttempts: number;
+  timeLimitMinutes: number;
   totalQuestions: number;
   createdAt: string;
   candidateAttemptsCount: number;
@@ -70,11 +72,14 @@ interface ActiveQuizQuestion {
 
 interface ActiveQuizSession {
   _id: string;
+  attemptId: string;
+  startedAt: string;
   title: string;
   topic: string;
   difficulty: DifficultyTier;
   description: string;
   maxAttempts: number;
+  timeLimitMinutes: number;
   attemptNumber: number;
   totalQuestions: number;
   questions: ActiveQuizQuestion[];
@@ -88,6 +93,8 @@ interface QuizSubmissionResult {
   attemptNumber: number;
   maxAttempts: number;
   remainingAttempts: number | null;
+  status: "completed" | "timed_out";
+  timeSpentSeconds: number;
   breakdown: Array<{
     questionId: string;
     question: string;
@@ -220,6 +227,7 @@ export default function CandidateWorkspace() {
   // Candidate Quizzes State
   const [candidateQuizzes, setCandidateQuizzes] = useState<CandidateQuizItem[]>([]);
   const [loadingCandidateQuizzes, setLoadingCandidateQuizzes] = useState(false);
+  const [resultsQuiz, setResultsQuiz] = useState<CandidateQuizItem | null>(null);
 
   // Active Quiz Runner State
   const [activeQuizModal, setActiveQuizModal] = useState<ActiveQuizSession | null>(null);
@@ -229,6 +237,10 @@ export default function CandidateWorkspace() {
   const [quizResult, setQuizResult] = useState<QuizSubmissionResult | null>(null);
   const [quizRunnerError, setQuizRunnerError] = useState<string | null>(null);
   const [startingQuizId, setStartingQuizId] = useState<string | null>(null);
+  const [quizClockNow, setQuizClockNow] = useState<number | null>(null);
+  const [leavingQuiz, setLeavingQuiz] = useState(false);
+  const quizSubmissionInFlight = useRef(false);
+  const timeoutSubmissionTriggered = useRef(false);
 
   const hydrateFromProfile = useCallback(async () => {
     try {
@@ -276,6 +288,21 @@ export default function CandidateWorkspace() {
     }
   }, []);
 
+  const logWorkspaceActivity = useCallback(
+    (
+      action: string,
+      category: "interview" | "board" | "profile",
+      detail: string
+    ) => {
+      fetch("/api/activity", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action, category, detail }),
+      }).catch(() => {});
+    },
+    []
+  );
+
   // Authentication check + initial hydration
   useEffect(() => {
     fetch("/api/auth/me")
@@ -307,6 +334,8 @@ export default function CandidateWorkspace() {
     setQuizResult(null);
     setQuizAnswers({});
     setActiveQuizQuestionIdx(0);
+    quizSubmissionInFlight.current = false;
+    timeoutSubmissionTriggered.current = false;
 
     try {
       const res = await fetch(`/api/quizzes/${quizId}?take=true`, {
@@ -317,6 +346,7 @@ export default function CandidateWorkspace() {
         throw new Error(data.error || "Failed to start quiz.");
       }
       setActiveQuizModal(data.quiz);
+      setQuizClockNow(null);
       logWorkspaceActivity(
         "Started Quiz Assessment",
         "board",
@@ -338,49 +368,121 @@ export default function CandidateWorkspace() {
     }));
   };
 
-  const handleSubmitQuiz = async () => {
-    if (!activeQuizModal) return;
-    setQuizSubmitting(true);
-    setQuizRunnerError(null);
+  const handleSubmitQuiz = useCallback(
+    async (requestedStatus: "completed" | "timed_out" = "completed") => {
+      if (!activeQuizModal) return;
+      if (quizSubmissionInFlight.current) return;
+      quizSubmissionInFlight.current = true;
+      setQuizSubmitting(true);
+      setQuizRunnerError(null);
 
+      try {
+        const res = await fetch(`/api/quizzes/${activeQuizModal._id}/submit`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            attemptId: activeQuizModal.attemptId,
+            answers: quizAnswers,
+            status: requestedStatus,
+          }),
+        });
+
+        const data = await res.json();
+        if (!res.ok) {
+          throw new Error(data.error || "Failed to submit assessment.");
+        }
+
+        setQuizResult(data);
+        fetchCandidateQuizzes();
+        logWorkspaceActivity(
+          "Completed Quiz Assessment",
+          "board",
+          `${activeQuizModal.title} — Score: ${data.score}/${data.total} (${data.percentage}%)`
+        );
+      } catch (err: unknown) {
+        setQuizRunnerError(
+          err instanceof Error ? err.message : "Error submitting quiz answers."
+        );
+      } finally {
+        setQuizSubmitting(false);
+        quizSubmissionInFlight.current = false;
+      }
+    },
+    [activeQuizModal, quizAnswers, fetchCandidateQuizzes, logWorkspaceActivity]
+  );
+
+  const handleLeaveQuiz = async () => {
+    if (!activeQuizModal || leavingQuiz || quizSubmitting) return;
+    setLeavingQuiz(true);
+    setQuizRunnerError(null);
     try {
-      const res = await fetch(`/api/quizzes/${activeQuizModal._id}/submit`, {
+      const res = await fetch(`/api/quizzes/${activeQuizModal._id}/leave`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          attemptId: activeQuizModal.attemptId,
           answers: quizAnswers,
-          questionOrder: activeQuizModal.questions.map((q) => q.id),
         }),
       });
-
       const data = await res.json();
       if (!res.ok) {
-        throw new Error(data.error || "Failed to submit assessment.");
+        throw new Error(data.error || "Could not leave this quiz attempt.");
       }
-
-      setQuizResult(data);
       fetchCandidateQuizzes();
-      logWorkspaceActivity(
-        "Completed Quiz Assessment",
-        "board",
-        `${activeQuizModal.title} — Score: ${data.score}/${data.total} (${data.percentage}%)`
+      setBoardNotice(
+        `Attempt ${data.attemptNumber} was recorded as left early and counts toward the quiz limit.`
       );
+      handleCloseQuizModal();
     } catch (err: unknown) {
       setQuizRunnerError(
-        err instanceof Error ? err.message : "Error submitting quiz answers."
+        err instanceof Error ? err.message : "Could not leave this quiz attempt."
       );
     } finally {
-      setQuizSubmitting(false);
+      setLeavingQuiz(false);
     }
   };
 
-  const handleCloseQuizModal = () => {
+  function handleCloseQuizModal() {
     setActiveQuizModal(null);
     setQuizResult(null);
     setQuizAnswers({});
     setActiveQuizQuestionIdx(0);
     setQuizRunnerError(null);
-  };
+  }
+
+  const remainingQuizSeconds = useMemo(() => {
+    if (
+      !activeQuizModal ||
+      activeQuizModal.timeLimitMinutes <= 0 ||
+      quizClockNow === null
+    ) {
+      return null;
+    }
+    const expiresAt =
+      new Date(activeQuizModal.startedAt).getTime() +
+      activeQuizModal.timeLimitMinutes * 60 * 1000;
+    return Math.max(0, Math.ceil((expiresAt - quizClockNow) / 1000));
+  }, [activeQuizModal, quizClockNow]);
+
+  useEffect(() => {
+    if (!activeQuizModal || quizResult || activeQuizModal.timeLimitMinutes <= 0) {
+      return;
+    }
+    const interval = window.setInterval(() => setQuizClockNow(Date.now()), 1000);
+    return () => window.clearInterval(interval);
+  }, [activeQuizModal, quizResult]);
+
+  useEffect(() => {
+    if (
+      remainingQuizSeconds === 0 &&
+      activeQuizModal &&
+      !quizResult &&
+      !timeoutSubmissionTriggered.current
+    ) {
+      timeoutSubmissionTriggered.current = true;
+      handleSubmitQuiz("timed_out");
+    }
+  }, [remainingQuizSeconds, activeQuizModal, quizResult, handleSubmitQuiz]);
 
   const practicedTopics = useMemo(() => {
     return mockSessions.flatMap((s) => [s.focus, ...(s.questions?.map((q) => q.stage) || [])]);
@@ -413,18 +515,6 @@ export default function CandidateWorkspace() {
     } catch {
       // Ignored
     }
-  };
-
-  const logWorkspaceActivity = (
-    action: string,
-    category: "interview" | "board" | "profile",
-    detail: string
-  ) => {
-    fetch("/api/activity", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action, category, detail }),
-    }).catch(() => {});
   };
 
   const handleResetConfiguration = () => {
@@ -1395,10 +1485,17 @@ export default function CandidateWorkspace() {
                               </div>
 
                               <div className="pt-3 border-t border-[#E5E2DA] space-y-3">
-                                <div className="grid grid-cols-3 gap-2 text-center text-xs font-mono">
+                                <div className="grid grid-cols-2 gap-2 text-center text-xs font-mono sm:grid-cols-4">
                                   <div className="rounded-md border border-[#E5E2DA] bg-[#FAF8F5] p-2">
                                     <div className="text-[10px] text-[#8E8B84] uppercase">Questions</div>
                                     <div className="font-bold text-[#1A1918] mt-0.5">{q.totalQuestions}</div>
+                                  </div>
+
+                                  <div className="rounded-md border border-[#E5E2DA] bg-[#FAF8F5] p-2">
+                                    <div className="text-[10px] text-[#8E8B84] uppercase">Time Limit</div>
+                                    <div className="font-bold text-[#1A1918] mt-0.5">
+                                      {q.timeLimitMinutes > 0 ? `${q.timeLimitMinutes} min` : "None"}
+                                    </div>
                                   </div>
 
                                   <div className="rounded-md border border-[#E5E2DA] bg-[#FAF8F5] p-2">
@@ -1417,35 +1514,45 @@ export default function CandidateWorkspace() {
                                   </div>
                                 </div>
 
-                                <div className="flex items-center justify-between gap-3 pt-1">
+                                <div className="flex flex-col items-start justify-between gap-2 pt-1 sm:flex-row sm:items-center">
                                   <div className="text-[11px] font-mono text-[#6E6B65] flex items-center gap-1">
                                     <Shuffle className="w-3 h-3 text-[#1F7A55]" />
                                     <span>Jumbled Order</span>
                                   </div>
 
-                                  <button
-                                    onClick={() => handleStartQuiz(q._id)}
-                                    disabled={!q.canAttempt || startingQuizId === q._id}
-                                    className={`inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-semibold transition-all shadow-xs ${
-                                      q.canAttempt
-                                        ? "bg-[#1A1918] text-[#FAF8F5] hover:bg-[#2C2A28] active:scale-[0.98]"
-                                        : "bg-[#F2EFE9] text-[#8E8B84] border border-[#E5E2DA] cursor-not-allowed"
-                                    }`}
-                                  >
-                                    {startingQuizId === q._id ? (
-                                      <>
-                                        <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                                        <span>Preparing...</span>
-                                      </>
-                                    ) : q.canAttempt ? (
-                                      <>
-                                        <span>{q.candidateAttemptsCount > 0 ? "Retake Quiz" : "Take Quiz"}</span>
-                                        <ArrowRight className="w-3.5 h-3.5" />
-                                      </>
-                                    ) : (
-                                      <span>Attempts Exhausted</span>
-                                    )}
-                                  </button>
+                                  <div className="flex flex-wrap items-center gap-2">
+                                    <button
+                                      type="button"
+                                      onClick={() => setResultsQuiz(q)}
+                                      className="inline-flex items-center gap-1.5 rounded-lg border border-[#D5D1C7] bg-white px-3 py-2 text-xs font-medium text-[#1A1918] hover:bg-[#FAF8F5]"
+                                    >
+                                      <Award className="h-3.5 w-3.5 text-[#1F7A55]" />
+                                      Leaderboard
+                                    </button>
+                                    <button
+                                      onClick={() => handleStartQuiz(q._id)}
+                                      disabled={!q.canAttempt || startingQuizId === q._id}
+                                      className={`inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-semibold transition-all shadow-xs ${
+                                        q.canAttempt
+                                          ? "bg-[#1A1918] text-[#FAF8F5] hover:bg-[#2C2A28] active:scale-[0.98]"
+                                          : "bg-[#F2EFE9] text-[#8E8B84] border border-[#E5E2DA] cursor-not-allowed"
+                                      }`}
+                                    >
+                                      {startingQuizId === q._id ? (
+                                        <>
+                                          <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                                          <span>Preparing...</span>
+                                        </>
+                                      ) : q.canAttempt ? (
+                                        <>
+                                          <span>{q.candidateAttemptsCount > 0 ? "Retake Quiz" : "Take Quiz"}</span>
+                                          <ArrowRight className="w-3.5 h-3.5" />
+                                        </>
+                                      ) : (
+                                        <span>Attempts Exhausted</span>
+                                      )}
+                                    </button>
+                                  </div>
                                 </div>
                               </div>
                             </div>
@@ -1811,6 +1918,19 @@ export default function CandidateWorkspace() {
                             Attempt #{activeQuizModal.attemptNumber}
                             {activeQuizModal.maxAttempts > 0 && ` of ${activeQuizModal.maxAttempts}`}
                           </span>
+                          {remainingQuizSeconds !== null && (
+                            <span
+                              className={`inline-flex items-center gap-1 rounded-sm border px-2 py-0.5 text-[10px] font-mono ${
+                                remainingQuizSeconds <= 60
+                                  ? "border-[#FCA5A5] bg-[#FEF2F2] text-[#991B1B]"
+                                  : "border-[#E5E2DA] bg-[#FAF8F5] text-[#6E6B65]"
+                              }`}
+                            >
+                              <Clock className="h-3 w-3" />
+                              {Math.floor(remainingQuizSeconds / 60)}:
+                              {String(remainingQuizSeconds % 60).padStart(2, "0")} left
+                            </span>
+                          )}
                         </div>
                         <h2 className="text-xl font-bold text-[#1A1918]">
                           {activeQuizModal.title}
@@ -1818,21 +1938,23 @@ export default function CandidateWorkspace() {
                       </div>
 
                       <button
-                        onClick={handleCloseQuizModal}
+                        onClick={handleLeaveQuiz}
+                        disabled={leavingQuiz || quizSubmitting}
                         className="p-1.5 rounded-md text-[#8E8B84] hover:text-[#1A1918] hover:bg-[#FAF8F5] transition-colors"
-                        title="Exit Quiz"
+                        title="Leave quiz (uses one attempt)"
                       >
-                        <X className="w-4 h-4" />
+                        {leavingQuiz ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <X className="w-4 h-4" />
+                        )}
                       </button>
                     </div>
 
                     {/* Telemetry Strip: Jumbled notice + Progress */}
                     <div className="space-y-2">
                       <div className="flex items-center justify-between text-xs font-mono text-[#6E6B65]">
-                        <span className="flex items-center gap-1.5 text-[#1F7A55] font-semibold">
-                          <Shuffle className="w-3.5 h-3.5" />
-                          <span>Jumbled Question Order (Randomized)</span>
-                        </span>
+                      
                         <span>
                           Question {activeQuizQuestionIdx + 1} of {activeQuizModal.totalQuestions}
                         </span>
@@ -1917,17 +2039,27 @@ export default function CandidateWorkspace() {
                     )}
 
                     {/* Footer Nav Controls */}
-                    <div className="flex items-center justify-between pt-4 border-t border-[#E5E2DA]">
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setActiveQuizQuestionIdx((prev) => Math.max(0, prev - 1))
-                        }
-                        disabled={activeQuizQuestionIdx === 0}
-                        className="px-4 py-2 rounded-lg border border-[#E5E2DA] text-xs font-medium text-[#6E6B65] hover:text-[#1A1918] hover:bg-[#FAF8F5] disabled:opacity-40 disabled:cursor-not-allowed transition-all"
-                      >
-                        Previous Question
-                      </button>
+                    <div className="flex items-center justify-between gap-2 pt-4 border-t border-[#E5E2DA]">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={handleLeaveQuiz}
+                          disabled={leavingQuiz || quizSubmitting}
+                          className="rounded-lg border border-[#E5E2DA] px-3 py-2 text-xs font-medium text-[#6E6B65] hover:bg-[#FAF8F5] disabled:opacity-50"
+                        >
+                          {leavingQuiz ? "Leaving..." : "Leave quiz · uses 1 attempt"}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setActiveQuizQuestionIdx((prev) => Math.max(0, prev - 1))
+                          }
+                          disabled={activeQuizQuestionIdx === 0 || quizSubmitting}
+                          className="px-4 py-2 rounded-lg border border-[#E5E2DA] text-xs font-medium text-[#6E6B65] hover:text-[#1A1918] hover:bg-[#FAF8F5] disabled:opacity-40 disabled:cursor-not-allowed transition-all"
+                        >
+                          Previous
+                        </button>
+                      </div>
 
                       {activeQuizQuestionIdx < activeQuizModal.totalQuestions - 1 ? (
                         <button
@@ -1945,7 +2077,7 @@ export default function CandidateWorkspace() {
                       ) : (
                         <button
                           type="button"
-                          onClick={handleSubmitQuiz}
+                          onClick={() => handleSubmitQuiz()}
                           disabled={quizSubmitting}
                           className="inline-flex items-center gap-1.5 px-6 py-2.5 rounded-lg bg-[#1F7A55] text-white text-xs font-semibold hover:bg-[#186043] disabled:opacity-50 transition-all shadow-xs"
                         >
@@ -1972,7 +2104,11 @@ export default function CandidateWorkspace() {
                       <div>
                         <div className="inline-flex items-center gap-1.5 text-xs font-mono text-[#1F7A55]">
                           <CheckCircle2 className="w-4 h-4" />
-                          <span>Assessment Complete</span>
+                          <span>
+                            {quizResult.status === "timed_out"
+                              ? "Time expired · submitted"
+                              : "Assessment Complete"}
+                          </span>
                         </div>
                         <h2 className="text-2xl font-bold text-[#1A1918] mt-1">
                           Performance Report: {activeQuizModal.title}
@@ -2083,6 +2219,14 @@ export default function CandidateWorkspace() {
           </div>
         )}
       </AnimatePresence>
+      {resultsQuiz && (
+        <QuizResultsModal
+          quizId={resultsQuiz._id}
+          quizTitle={resultsQuiz.title}
+          view="candidate"
+          onClose={() => setResultsQuiz(null)}
+        />
+      )}
     </div>
   );
 }
