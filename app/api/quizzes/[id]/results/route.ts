@@ -43,9 +43,55 @@ export async function GET(_req: Request, { params }: RouteParams) {
         .find({ quizId })
         .sort({ submittedAt: -1, startedAt: -1 })
         .toArray();
+      const bestByCandidate = new Map<
+        string,
+        (typeof attempts)[number]
+      >();
+      for (const attempt of attempts) {
+        if (attempt.status === "in_progress" || attempt.status === "abandoned") {
+          continue;
+        }
+        const previous = bestByCandidate.get(attempt.candidateId);
+        if (
+          !previous ||
+          attempt.percentage > previous.percentage ||
+          (attempt.percentage === previous.percentage &&
+            (attempt.score > previous.score ||
+              (attempt.score === previous.score &&
+                (attempt.timeSpentSeconds ?? Number.MAX_SAFE_INTEGER) <
+                  (previous.timeSpentSeconds ?? Number.MAX_SAFE_INTEGER))))
+        ) {
+          bestByCandidate.set(attempt.candidateId, attempt);
+        }
+      }
+      const rankedAttempts = Array.from(bestByCandidate.values()).sort(
+        (a, b) =>
+          b.percentage - a.percentage ||
+          b.score - a.score ||
+          (a.timeSpentSeconds ?? Number.MAX_SAFE_INTEGER) -
+            (b.timeSpentSeconds ?? Number.MAX_SAFE_INTEGER)
+      );
+      const leaderboard = rankedAttempts.map((attempt, index) => {
+        const previous = rankedAttempts[index - 1];
+        return {
+          rank:
+            previous &&
+            previous.percentage === attempt.percentage &&
+            previous.score === attempt.score
+              ? index
+              : index + 1,
+          candidateName: attempt.candidateName,
+          attemptNumber: attempt.attemptNumber,
+          score: attempt.score,
+          total: attempt.total,
+          percentage: attempt.percentage,
+          timeSpentSeconds: attempt.timeSpentSeconds ?? null,
+        };
+      });
       return NextResponse.json({
         quiz: { _id: quizId, title: quiz.title, maxAttempts: quiz.maxAttempts },
         view: "expert",
+        leaderboard,
         attempts: attempts.map((attempt) => ({
           attemptId: attempt._id?.toString(),
           candidateName: attempt.candidateName,
@@ -64,63 +110,49 @@ export async function GET(_req: Request, { params }: RouteParams) {
       });
     }
 
-    const scoredAttempts = await attemptsCol
-      .find({ quizId, status: { $in: ["completed", "timed_out"] } })
+    const candidateAttempts = await attemptsCol
+      .find({ quizId, candidateId: user._id.toString() })
+      .sort({ submittedAt: -1, startedAt: -1 })
       .toArray();
-    const bestByCandidate = new Map<
-      string,
-      (typeof scoredAttempts)[number]
-    >();
-    for (const attempt of scoredAttempts) {
-      const previous = bestByCandidate.get(attempt.candidateId);
-      if (
-        !previous ||
-        attempt.percentage > previous.percentage ||
-        (attempt.percentage === previous.percentage &&
-          (attempt.score > previous.score ||
-            (attempt.score === previous.score &&
-              (attempt.timeSpentSeconds ?? Number.MAX_SAFE_INTEGER) <
-                (previous.timeSpentSeconds ?? Number.MAX_SAFE_INTEGER))))
-      ) {
-        bestByCandidate.set(attempt.candidateId, attempt);
-      }
-    }
+    return NextResponse.json({
+      quiz: { _id: quizId, title: quiz.title },
+      view: "candidate",
+      attempts: candidateAttempts.map((attempt) => {
+        const questionsById = new Map(
+          (quiz.questions || []).map((question) => [question.id, question])
+        );
+        const breakdown =
+          attempt.breakdown ||
+          attempt.questionOrder
+            .map((questionId) => questionsById.get(questionId))
+            .filter((question) => question !== undefined)
+            .map((question) => {
+              const selectedAnswer = attempt.answers?.[question.id] || "";
+              return {
+                questionId: question.id,
+                question: question.question,
+                options: question.options,
+                selectedAnswer,
+                correctAnswer: question.correctAnswer,
+                isCorrect:
+                  selectedAnswer.trim().toLowerCase() ===
+                  question.correctAnswer.trim().toLowerCase(),
+                explanation: question.explanation,
+              };
+            });
 
-    const leaderboard = Array.from(bestByCandidate.values())
-      .sort(
-        (a, b) =>
-          b.percentage - a.percentage ||
-          b.score - a.score ||
-          (a.timeSpentSeconds ?? Number.MAX_SAFE_INTEGER) -
-            (b.timeSpentSeconds ?? Number.MAX_SAFE_INTEGER) ||
-          (a.submittedAt?.getTime() ?? 0) - (b.submittedAt?.getTime() ?? 0)
-      )
-      .map((attempt, index, entries) => {
-        const previous = entries[index - 1];
-        const rank =
-          previous &&
-          previous.percentage === attempt.percentage &&
-          previous.score === attempt.score
-            ? index
-            : index + 1;
         return {
-          rank,
-          candidateName: attempt.candidateName,
+          attemptId: attempt._id?.toString(),
           attemptNumber: attempt.attemptNumber,
           score: attempt.score,
           total: attempt.total,
           percentage: attempt.percentage,
-          status: attempt.status,
+          status: attempt.status || "completed",
           timeSpentSeconds: attempt.timeSpentSeconds ?? null,
           submittedAt: attempt.submittedAt || null,
-          isCurrentUser: attempt.candidateId === user._id?.toString(),
+          breakdown,
         };
-      });
-
-    return NextResponse.json({
-      quiz: { _id: quizId, title: quiz.title },
-      view: "candidate",
-      leaderboard,
+      }),
     });
   } catch (error: unknown) {
     console.error("[Quiz Results GET Error]:", error);
