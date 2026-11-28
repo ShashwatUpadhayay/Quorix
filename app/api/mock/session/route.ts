@@ -1,12 +1,23 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth";
-import { getDatabase, MockSessionDoc, DifficultyTier, InterviewType } from "@/lib/mongodb";
+import {
+  getDatabase,
+  getSystemDesignSessionsCollection,
+  MockSessionDoc,
+  SystemDesignSessionDoc,
+  DifficultyTier,
+  InterviewType,
+} from "@/lib/mongodb";
 import { recordUserActivity } from "@/lib/activity";
 import { getQuestionCountForDuration } from "@/lib/mockInterviewEngine";
 import {
   generateFallbackSessionQuestions,
   generateSessionQuestions,
 } from "@/lib/pythonQuestionPipeline";
+import {
+  selectScenarioForCandidate,
+  getScenarioById,
+} from "@/lib/systemDesignScenarios";
 
 const TIER_NUMERIC_MAP: Record<DifficultyTier, number> = {
   Foundational: 1,
@@ -17,7 +28,7 @@ const TIER_NUMERIC_MAP: Record<DifficultyTier, number> = {
 
 /**
  * GET /api/mock/session
- * Lists all mock interview sessions for the current authenticated candidate.
+ * Lists all mock interview sessions (standard & system design) for the current authenticated candidate.
  */
 export async function GET() {
   try {
@@ -29,18 +40,62 @@ export async function GET() {
     const userId = user._id.toString();
     const db = await getDatabase();
 
-    const sessions = await db
-      .collection<MockSessionDoc>("mock_sessions")
-      .find({ userId })
-      .sort({ createdAt: -1 })
-      .limit(50)
-      .toArray();
+    const [standardSessions, systemDesignSessions] = await Promise.all([
+      db
+        .collection<MockSessionDoc>("mock_sessions")
+        .find({ userId })
+        .sort({ createdAt: -1 })
+        .limit(50)
+        .toArray(),
+      db
+        .collection<SystemDesignSessionDoc>("system_design_sessions")
+        .find({ userId })
+        .sort({ createdAt: -1 })
+        .limit(50)
+        .toArray(),
+    ]);
+
+    const formattedStandard = standardSessions.map((s) => ({
+      ...s,
+      _id: s._id?.toString(),
+      roomUrl: `/candidate/mock/${s._id?.toString()}`,
+    }));
+
+    const formattedSystemDesign = systemDesignSessions.map((s) => ({
+      _id: s._id?.toString(),
+      userId: s.userId,
+      candidateName: s.candidateName,
+      title: `${s.level} ${s.scenarioTitle} System Design`,
+      interviewType: "system_design" as InterviewType,
+      level: s.level,
+      difficultyNumeric: TIER_NUMERIC_MAP[s.level] || 2,
+      focus: s.scenarioTitle,
+      durationMinutes: s.durationMinutes,
+      status: s.status,
+      questions: [],
+      responses: [],
+      plannedQuestionCount: 1,
+      currentQuestionIndex: 0,
+      overallScore: s.evaluation?.overallScore,
+      summaryFeedback: s.evaluation?.summaryFeedback,
+      systemDesignEvaluation: s.evaluation,
+      systemDesignTurns: s.turns,
+      scenario: s.scenario,
+      currentPhase: s.currentPhase,
+      roomUrl: `/candidate/mock/system-design/${s._id?.toString()}`,
+      startedAt: s.startedAt,
+      completedAt: s.completedAt,
+      createdAt: s.createdAt,
+      updatedAt: s.updatedAt,
+    }));
+
+    const allSessions = [...formattedStandard, ...formattedSystemDesign].sort(
+      (a, b) =>
+        new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+    );
 
     return NextResponse.json({
-      sessions: sessions.map((s) => ({
-        ...s,
-        _id: s._id?.toString(),
-      })),
+      sessions: allSessions,
     });
   } catch (error: unknown) {
     console.error("[GET /api/mock/session] error:", error);
@@ -53,7 +108,7 @@ export async function GET() {
 
 /**
  * POST /api/mock/session
- * Initializes a new mock interview session with tailored questions.
+ * Initializes a new mock interview session with tailored questions or System Design scenario.
  */
 export async function POST(req: NextRequest) {
   try {
@@ -85,6 +140,92 @@ export async function POST(req: NextRequest) {
         : "Fullstack Architecture";
 
     const durationMinutes = Number(body.durationMinutes) || 30;
+
+    // Handle System Design mode separately
+    if (interviewType === "system_design") {
+      const db = await getDatabase();
+      const profile = await db.collection("profiles").findOne({ userId });
+      const profileDoc = profile as {
+        skills?: Array<{ name?: string }>;
+        interviewConfig?: {
+          primaryTopics?: string[];
+          focusAreas?: string[];
+        };
+      } | null;
+
+      const candidateTags = [
+        ...(profileDoc?.skills || []).map((s) => s.name || "").filter(Boolean),
+        ...(profileDoc?.interviewConfig?.primaryTopics || []),
+        ...(profileDoc?.interviewConfig?.focusAreas || []),
+        focus,
+      ];
+
+      const scenario = body.scenarioId
+        ? getScenarioById(body.scenarioId) ||
+          selectScenarioForCandidate(candidateTags, level, focus)
+        : selectScenarioForCandidate(candidateTags, level, focus);
+
+      const openingMessage = `Welcome to your System Design interview for **${scenario.title}**.
+
+Here is your scenario:
+> "${scenario.brief}"
+
+Take a moment to digest this. We have about ${durationMinutes} minutes. You are driving the session.
+To start, what questions do you have about the functional scope or non-functional scale and constraints?`;
+
+      const newSystemDesignSession: Omit<SystemDesignSessionDoc, "_id"> = {
+        userId,
+        candidateName: user.name || "Candidate",
+        scenarioId: scenario.id,
+        scenarioTitle: scenario.title,
+        scenario,
+        level,
+        durationMinutes,
+        currentPhase: "requirements",
+        status: "in_progress",
+        revealedRequirements: [],
+        coveredComponents: [],
+        turns: [
+          {
+            id: `turn_${Date.now()}_0`,
+            speaker: "interviewer",
+            phase: "requirements",
+            message: openingMessage,
+            moveType: "nudge",
+            timestamp: new Date(),
+          },
+        ],
+        snapshots: [],
+        candidateNotes: "",
+        startedAt: new Date(),
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+
+      const sdCollection = await getSystemDesignSessionsCollection();
+      const result = await sdCollection.insertOne(
+        newSystemDesignSession as SystemDesignSessionDoc
+      );
+      const sessionId = result.insertedId.toString();
+
+      await recordUserActivity({
+        userId,
+        action: "Initiated System Design Session",
+        category: "interview",
+        detail: `${scenario.title} (${level} · ${durationMinutes} mins)`,
+      });
+
+      return NextResponse.json({
+        success: true,
+        sessionId,
+        roomUrl: `/candidate/mock/system-design/${sessionId}`,
+        session: {
+          ...newSystemDesignSession,
+          _id: sessionId,
+          roomUrl: `/candidate/mock/system-design/${sessionId}`,
+        },
+      });
+    }
     const plannedQuestionCount = getQuestionCountForDuration(durationMinutes);
 
     const typeLabels: Record<InterviewType, string> = {

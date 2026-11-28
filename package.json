@@ -12,6 +12,7 @@
     "pipeline:python": "python -m python_pipeline.cli generate"
   },
   "dependencies": {
+    "@excalidraw/excalidraw": "^0.18.1",
     "bcryptjs": "^3.0.3",
     "dotenv": "^18.0.10",
     "framer-motion": "^14.10.1",

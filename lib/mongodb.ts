@@ -257,6 +257,120 @@ export interface MockSessionResponse {
 }
 
 /**
+ * System Design Mode Types & Schemas
+ */
+export type SystemDesignPhase =
+  | "requirements"
+  | "estimation"
+  | "high_level_design"
+  | "deep_dive"
+  | "bottlenecks"
+  | "wrap_up";
+
+export interface ScenarioCardScale {
+  dau?: string;
+  writesPerSec?: string;
+  readsPerSec?: string;
+  storagePerYear?: string;
+  bandwidth?: string;
+  notes?: string;
+}
+
+export interface ScenarioDeepDiveTopic {
+  topic: string;
+  probeQuestion: string;
+  keyTradeoffs: string[];
+}
+
+export interface ScenarioFailureChallenge {
+  trigger: string;
+  challenge: string;
+  expectedHandling: string;
+}
+
+export interface ScenarioCard {
+  id: string;
+  title: string;
+  topic: string;
+  tags: string[];
+  difficulty: DifficultyTier;
+  scaleTier: "moderate" | "high" | "hyperscale";
+  brief: string; // The opening scenario description presented to the candidate
+  hiddenRequirements: {
+    functional: string[]; // Revealed only when candidate asks
+    nonFunctional: string[]; // Latency, availability SLA, consistency model, etc.
+    scale: ScenarioCardScale;
+    hiddenConstraints: string[]; // Edge cases, security, special constraints
+  };
+  expectedComponents: string[];
+  deepDiveTopics: ScenarioDeepDiveTopic[];
+  failureScenarios: ScenarioFailureChallenge[];
+  tradeoffs: string[];
+  sampleArchitectureHints?: string[];
+}
+
+export interface SystemDesignTurn {
+  id: string;
+  speaker: "interviewer" | "candidate" | "system";
+  phase: SystemDesignPhase;
+  message: string;
+  moveType?: "clarification" | "nudge" | "probe" | "challenge" | "advance" | "summary";
+  revealedRequirement?: string;
+  timestamp: Date;
+}
+
+export interface SystemDesignSnapshot {
+  phase: SystemDesignPhase;
+  timestamp: Date;
+  elementsCount: number;
+  graphSummary: string;
+  diagramJson?: string; // Serialized Excalidraw scene JSON
+}
+
+export interface SystemDesignEvaluation {
+  overallScore: number;
+  dimensions: {
+    requirementsGathering: { score: number; feedback: string };
+    estimation: { score: number; feedback: string };
+    architecture: { score: number; feedback: string };
+    dataAndApiDesign: { score: number; feedback: string };
+    depthAndTradeoffs: { score: number; feedback: string };
+    reliabilityAndScale: { score: number; feedback: string };
+    communicationAndClarity: { score: number; feedback: string };
+  };
+  coveredComponents: string[];
+  missedComponents: string[];
+  strengths: string[];
+  weaknesses: string[];
+  summaryFeedback: string;
+}
+
+export interface SystemDesignSessionDoc {
+  _id?: string;
+  userId: string;
+  candidateName: string;
+  scenarioId: string;
+  scenarioTitle: string;
+  scenario: ScenarioCard;
+  level: DifficultyTier;
+  durationMinutes: number;
+  currentPhase: SystemDesignPhase;
+  status: "in_progress" | "completed" | "abandoned";
+  revealedRequirements: string[];
+  coveredComponents: string[];
+  turns: SystemDesignTurn[];
+  snapshots: SystemDesignSnapshot[];
+  currentDiagramJson?: string;
+  currentGraphSummary?: string;
+  candidateNotes?: string;
+  evaluation?: SystemDesignEvaluation;
+  startedAt: Date;
+  completedAt?: Date;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+/**
  * Mock Interview Session Document Schema
  */
 export interface MockSessionDoc {
@@ -288,6 +402,11 @@ export interface MockSessionDoc {
     clarity: number;
   };
   summaryFeedback?: string;
+  systemDesignEvaluation?: SystemDesignEvaluation;
+  systemDesignTurns?: SystemDesignTurn[];
+  scenario?: ScenarioCard;
+  currentPhase?: SystemDesignPhase;
+  roomUrl?: string;
   startedAt: Date;
   completedAt?: Date;
   createdAt: Date;
@@ -371,4 +490,12 @@ export async function getQuizzesCollection() {
 export async function getQuizAttemptsCollection() {
   const db = await getDatabase();
   return db.collection<QuizAttemptDoc>("quiz_attempts");
+}
+
+/**
+ * Access helper for System Design Sessions collection
+ */
+export async function getSystemDesignSessionsCollection() {
+  const db = await getDatabase();
+  return db.collection<SystemDesignSessionDoc>("system_design_sessions");
 }
