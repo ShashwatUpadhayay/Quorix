@@ -1203,6 +1203,7 @@ export default function CandidateWorkspace() {
                   ) : (
                     <div className="space-y-3">
                       {mockSessions.map((sessionItem) => {
+                        const isSystemDesign = sessionItem.interviewType === "system_design";
                         const dateFormatted = new Date(
                           sessionItem.createdAt
                         ).toLocaleDateString("en-US", {
@@ -1226,9 +1227,15 @@ export default function CandidateWorkspace() {
                                 <span className="font-bold text-[#1A1918] text-sm">
                                   {sessionItem.title}
                                 </span>
-                                <span className="rounded-md border border-[#E5E2DA] bg-[#FAF8F5] px-2 py-0.5 font-mono text-[10px] text-[#423F3A] uppercase">
-                                  {sessionItem.interviewType}
-                                </span>
+                                {isSystemDesign ? (
+                                  <span className="rounded-md border border-[#C5D0E6] bg-[#EEF2F9] px-2 py-0.5 font-mono text-[10px] text-[#2C4875] uppercase font-semibold">
+                                    System Design
+                                  </span>
+                                ) : (
+                                  <span className="rounded-md border border-[#E5E2DA] bg-[#FAF8F5] px-2 py-0.5 font-mono text-[10px] text-[#423F3A] uppercase">
+                                    {sessionItem.interviewType}
+                                  </span>
+                                )}
                                 <span className="rounded-md border border-[#CBE4D6] bg-[#EDF3EC] px-2 py-0.5 font-mono text-[10px] text-[#1F7A55]">
                                   {sessionItem.level}
                                 </span>
@@ -1240,6 +1247,16 @@ export default function CandidateWorkspace() {
                                     Overall: {sessionItem.overallScore ?? "—"}/10
                                   </span>
                                 )}
+                                {sessionItem.status === "in_progress" && isSystemDesign && (
+                                  <Link
+                                    href={`/candidate/mock/system-design/${sessionItem._id}`}
+                                    onClick={(e) => e.stopPropagation()}
+                                    className="inline-flex items-center gap-1.5 rounded-lg bg-[#1A1918] text-[#FAF8F5] px-3 py-1.5 text-xs font-semibold hover:bg-[#2E2C29] transition-colors"
+                                  >
+                                    <Play className="w-3.5 h-3.5 fill-current" />
+                                    <span>Resume Studio</span>
+                                  </Link>
+                                )}
                                 <button
                                   type="button"
                                   onClick={(e) => {
@@ -1249,7 +1266,7 @@ export default function CandidateWorkspace() {
                                   className="inline-flex items-center gap-1 text-xs font-medium text-[#1A1918] hover:underline"
                                 >
                                   <Eye className="w-3.5 h-3.5" />
-                                  <span>View Transcript</span>
+                                  <span>{isSystemDesign ? "View Architecture Report" : "View Transcript"}</span>
                                 </button>
                               </div>
                             </div>
@@ -1263,9 +1280,9 @@ export default function CandidateWorkspace() {
                                 <span>{sessionItem.durationMinutes} min session</span>
                                 <span>·</span>
                                 <span>
-                                  {sessionItem.responses?.length || 0} of{" "}
-                                  {sessionItem.questions?.length || 0} questions
-                                  answered
+                                  {isSystemDesign
+                                    ? `${sessionItem.systemDesignTurns?.length || 0} discussion turns · Whiteboard Studio`
+                                    : `${sessionItem.responses?.length || 0} of ${sessionItem.questions?.length || 0} questions answered`}
                                 </span>
                               </div>
 
@@ -1277,8 +1294,8 @@ export default function CandidateWorkspace() {
                                 }`}
                               >
                                 {sessionItem.status === "completed"
-                                  ? "Completed & Evaluated"
-                                  : "In Progress / Incomplete"}
+                                  ? isSystemDesign ? "Completed · 7 Dimensions Evaluated" : "Completed & Evaluated"
+                                  : isSystemDesign ? `In Progress (${sessionItem.currentPhase || "Whiteboard"})` : "In Progress / Incomplete"}
                               </span>
                             </div>
                           </div>
@@ -1658,7 +1675,9 @@ export default function CandidateWorkspace() {
                               {sessionItem.title}
                             </div>
                             <div className="text-xs text-[#6E6B65] mt-1 tabular-nums">
-                              {sessionItem.responses?.length || 0} questions evaluated · {sessionItem.durationMinutes} min session
+                              {sessionItem.interviewType === "system_design"
+                                ? `${sessionItem.systemDesignTurns?.length || 0} discussion turns · ${sessionItem.durationMinutes} min whiteboard session`
+                                : `${sessionItem.responses?.length || 0} questions evaluated · ${sessionItem.durationMinutes} min session`}
                             </div>
                           </div>
 
@@ -1677,7 +1696,7 @@ export default function CandidateWorkspace() {
                               className="inline-flex items-center gap-1.5 rounded-lg border border-[#D5D1C7] bg-[#FAF8F5] px-3.5 py-2 hover:bg-[#EFECE4] active:scale-[0.98] text-xs font-medium text-[#1A1918] transition-all"
                             >
                               <Eye className="w-3.5 h-3.5" />
-                              <span>View Transcript</span>
+                              <span>{sessionItem.interviewType === "system_design" ? "View Architecture Report" : "View Transcript"}</span>
                             </button>
                           </div>
                         </div>
@@ -1764,129 +1783,268 @@ export default function CandidateWorkspace() {
                 </button>
               </div>
 
-              {/* Overall Score & Tri-factor Rubrics */}
-              <div className="rounded-xl border border-[#E5E2DA] bg-[#FFFFFF] p-5 space-y-4">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold font-mono text-[#6E6B65] uppercase">
-                    Evaluation Performance Summary
-                  </span>
-                  <span className="text-sm font-mono font-bold text-[#1F7A55] rounded border border-[#CBE4D6] bg-[#EDF3EC] px-3 py-1">
-                    Score: {selectedTranscriptSession.overallScore ?? "—"}/10
-                  </span>
-                </div>
+              {/* Drawer Content: System Design Mode vs Standard Q&A */}
+              {selectedTranscriptSession.interviewType === "system_design" ? (
+                <div className="space-y-6">
+                  {/* Scenario Brief & Resume CTA */}
+                  <div className="rounded-xl border border-[#E5E2DA] bg-[#FFFFFF] p-5 space-y-4">
+                    {selectedTranscriptSession.status === "in_progress" && (
+                      <Link
+                        href={`/candidate/mock/system-design/${selectedTranscriptSession._id}`}
+                        className="w-full flex items-center justify-center gap-2 rounded-lg bg-[#1F7A55] text-white py-2.5 text-xs font-semibold hover:bg-[#186244] transition-all shadow-xs"
+                      >
+                        <Play className="w-4 h-4 fill-current" />
+                        <span>Resume Interactive Studio Room</span>
+                      </Link>
+                    )}
 
-                {selectedTranscriptSession.categoryScores && (
-                  <div className="grid grid-cols-3 gap-2 text-center text-xs font-mono">
-                    <div className="rounded border border-[#E5E2DA] bg-[#FAF8F5] p-2.5">
-                      <div className="text-[10px] text-[#8E8B84]">RELEVANCE</div>
-                      <div className="text-sm font-bold text-[#1A1918] mt-0.5">
-                        {selectedTranscriptSession.categoryScores.relevance}/10
+                    {selectedTranscriptSession.scenario?.brief && (
+                      <div className="space-y-1">
+                        <div className="text-[10px] font-mono text-[#6E6B65] uppercase">Problem Brief</div>
+                        <p className="text-xs text-[#1A1918] italic leading-relaxed bg-[#FAF8F5] p-3 rounded-lg border border-[#E5E2DA]">
+                          &ldquo;{selectedTranscriptSession.scenario.brief}&rdquo;
+                        </p>
                       </div>
-                    </div>
-                    <div className="rounded border border-[#E5E2DA] bg-[#FAF8F5] p-2.5">
-                      <div className="text-[10px] text-[#8E8B84]">DEPTH</div>
-                      <div className="text-sm font-bold text-[#1A1918] mt-0.5">
-                        {selectedTranscriptSession.categoryScores.depth}/10
-                      </div>
-                    </div>
-                    <div className="rounded border border-[#E5E2DA] bg-[#FAF8F5] p-2.5">
-                      <div className="text-[10px] text-[#8E8B84]">CLARITY</div>
-                      <div className="text-sm font-bold text-[#1A1918] mt-0.5">
-                        {selectedTranscriptSession.categoryScores.clarity}/10
-                      </div>
+                    )}
+
+                    <div className="flex items-center justify-between text-xs font-mono text-[#6E6B65]">
+                      <span>Phase: <strong className="text-[#1A1918] uppercase">{selectedTranscriptSession.currentPhase || "Completed"}</strong></span>
+                      <span>Turns: <strong className="text-[#1A1918]">{selectedTranscriptSession.systemDesignTurns?.length || 0}</strong></span>
+                      <span>Target: <strong className="text-[#1A1918]">{selectedTranscriptSession.durationMinutes}m</strong></span>
                     </div>
                   </div>
-                )}
 
-                {selectedTranscriptSession.summaryFeedback && (
-                  <div className="text-xs text-[#423F3A] bg-[#FAF8F5] border border-[#E5E2DA] p-3 rounded-lg leading-relaxed">
-                    <span className="font-semibold text-[#1A1918]">
-                      AI Synthesis:{" "}
-                    </span>
-                    {selectedTranscriptSession.summaryFeedback}
-                  </div>
-                )}
-              </div>
-
-              {/* Step-by-Step Questions & Responses */}
-              <div className="space-y-4">
-                <div className="text-xs font-mono uppercase text-[#6E6B65]">
-                  Detailed Q&amp;A Log (
-                  {selectedTranscriptSession.responses?.length || 0} responses)
-                </div>
-
-                {selectedTranscriptSession.responses?.map(
-                  (resp: MockSessionResponse, idx: number) => (
-                    <div
-                      key={idx}
-                      className="rounded-xl border border-[#E5E2DA] bg-[#FFFFFF] p-5 space-y-3.5 shadow-xs"
-                    >
-                      <div className="flex items-center justify-between border-b border-[#E5E2DA] pb-2 text-xs">
-                        <span className="font-mono font-bold text-[#1A1918]">
-                          Question {idx + 1} ({resp.stage})
+                  {/* 7-Dimension Rubric Evaluation (if completed) */}
+                  {selectedTranscriptSession.systemDesignEvaluation && (
+                    <div className="rounded-xl border border-[#E5E2DA] bg-[#FFFFFF] p-5 space-y-4">
+                      <div className="flex items-center justify-between border-b border-[#E5E2DA] pb-3">
+                        <span className="text-xs font-bold font-mono text-[#6E6B65] uppercase">
+                          System Design 7-Dimension Rubric
                         </span>
-                        <span className="font-mono font-bold text-[#1F7A55]">
-                          {resp.scores.overall}/10
+                        <span className="text-sm font-mono font-bold text-[#1F7A55] rounded border border-[#CBE4D6] bg-[#EDF3EC] px-3 py-1">
+                          Score: {selectedTranscriptSession.systemDesignEvaluation.overallScore}/10
                         </span>
                       </div>
 
-                      <div className="text-xs font-semibold text-[#1A1918] leading-relaxed">
-                        {resp.questionPrompt}
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                        {Object.entries(selectedTranscriptSession.systemDesignEvaluation.dimensions).map(([dimKey, dimVal]) => {
+                          const labels: Record<string, string> = {
+                            requirementsGathering: "1. Requirements Gathering",
+                            estimation: "2. Back-of-Envelope Estimation",
+                            architecture: "3. High-Level Architecture",
+                            dataAndApiDesign: "4. Data & API Design",
+                            depthAndTradeoffs: "5. Depth & Trade-offs",
+                            reliabilityAndScale: "6. Reliability & 10x Scale",
+                            communicationAndClarity: "7. Communication & Diagram",
+                          };
+                          return (
+                            <div key={dimKey} className="rounded-lg border border-[#E5E2DA] bg-[#FAF8F5] p-3 space-y-1">
+                              <div className="flex items-center justify-between">
+                                <span className="font-semibold text-[#1A1918] text-[11px]">{labels[dimKey] || dimKey}</span>
+                                <span className="font-mono font-bold text-[#1F7A55]">{dimVal.score}/10</span>
+                              </div>
+                              <p className="text-[11px] text-[#6E6B65] leading-relaxed">{dimVal.feedback}</p>
+                            </div>
+                          );
+                        })}
                       </div>
 
-                      {resp.codeSubmitted && (
-                        <div className="space-y-1">
-                          <div className="text-[10px] font-mono text-[#8E8B84]">
-                            Candidate Code ({resp.language || "Code"}):
-                          </div>
-                          <pre className="rounded bg-[#1A1918] text-[#FAF8F5] p-3 text-[11px] font-mono overflow-x-auto leading-relaxed">
-                            {resp.codeSubmitted}
-                          </pre>
-                        </div>
-                      )}
-
-                      {resp.userAnswer && (
-                        <div className="space-y-1">
-                          <div className="text-[10px] font-mono text-[#8E8B84]">
-                            Candidate Written Rationale:
-                          </div>
-                          <div className="bg-[#FAF8F5] border border-[#E5E2DA] rounded p-3 text-xs text-[#33312E] font-mono leading-relaxed whitespace-pre-wrap">
-                            {resp.userAnswer}
-                          </div>
-                        </div>
-                      )}
-
-                      <div className="grid grid-cols-3 gap-2 text-center text-[11px] font-mono pt-1">
-                        <div className="border border-[#E5E2DA] bg-[#FAF8F5] rounded p-1.5">
-                          <span className="text-[#8E8B84] text-[10px]">Rel:</span>{" "}
-                          <span className="font-bold text-[#1A1918]">
-                            {resp.scores.relevance}/10
-                          </span>
-                        </div>
-                        <div className="border border-[#E5E2DA] bg-[#FAF8F5] rounded p-1.5">
-                          <span className="text-[#8E8B84] text-[10px]">Depth:</span>{" "}
-                          <span className="font-bold text-[#1A1918]">
-                            {resp.scores.depth}/10
-                          </span>
-                        </div>
-                        <div className="border border-[#E5E2DA] bg-[#FAF8F5] rounded p-1.5">
-                          <span className="text-[#8E8B84] text-[10px]">Clarity:</span>{" "}
-                          <span className="font-bold text-[#1A1918]">
-                            {resp.scores.clarity}/10
-                          </span>
+                      {/* Covered & Missed Components */}
+                      <div className="space-y-2 pt-2 border-t border-[#E5E2DA]">
+                        <div className="text-[10px] font-mono uppercase text-[#6E6B65]">Component Coverage</div>
+                        <div className="flex flex-wrap gap-1.5">
+                          {selectedTranscriptSession.systemDesignEvaluation.coveredComponents?.map((c) => (
+                            <span key={c} className="text-[10px] font-mono px-2 py-0.5 rounded bg-[#EDF3EC] text-[#1F7A55] border border-[#CBE4D6] flex items-center gap-1">
+                              ✓ {c}
+                            </span>
+                          ))}
+                          {selectedTranscriptSession.systemDesignEvaluation.missedComponents?.map((c) => (
+                            <span key={c} className="text-[10px] font-mono px-2 py-0.5 rounded bg-[#FAF8F5] text-[#8E8B84] border border-[#E5E2DA] line-through">
+                              {c}
+                            </span>
+                          ))}
                         </div>
                       </div>
 
-                      <div className="text-[11px] text-[#55524C] pt-2 border-t border-[#E5E2DA] leading-relaxed">
+                      {/* Synthesis feedback */}
+                      {selectedTranscriptSession.systemDesignEvaluation.summaryFeedback && (
+                        <div className="text-xs text-[#423F3A] bg-[#FAF8F5] border border-[#E5E2DA] p-3 rounded-lg leading-relaxed">
+                          <span className="font-semibold text-[#1A1918]">Synthesis: </span>
+                          {selectedTranscriptSession.systemDesignEvaluation.summaryFeedback}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Turns Transcript */}
+                  <div className="space-y-3">
+                    <div className="text-xs font-mono uppercase text-[#6E6B65]">
+                      Discussion &amp; Interviewer Probing Log ({selectedTranscriptSession.systemDesignTurns?.length || 0} turns)
+                    </div>
+
+                    {selectedTranscriptSession.systemDesignTurns?.map((turn, tIdx) => (
+                      <div
+                        key={turn.id || tIdx}
+                        className={`rounded-xl border p-4 space-y-2 ${
+                          turn.speaker === "interviewer"
+                            ? "bg-[#FFFFFF] border-[#E5E2DA]"
+                            : "bg-[#FAF8F5] border-[#D5D1C7]"
+                        }`}
+                      >
+                        <div className="flex items-center justify-between text-[11px] font-mono">
+                          <span className="font-bold text-[#1A1918] flex items-center gap-1.5">
+                            {turn.speaker === "interviewer" ? "AI System Design Interviewer" : "Candidate Response"}
+                            {turn.moveType && (
+                              <span className="text-[9px] uppercase px-1.5 py-0.5 rounded border border-[#E5E2DA] bg-[#FAF8F5] text-[#6E6B65]">
+                                {turn.moveType}
+                              </span>
+                            )}
+                          </span>
+                          <span className="text-[#8E8B84] uppercase text-[10px]">
+                            Phase: {turn.phase}
+                          </span>
+                        </div>
+
+                        <div className="text-xs text-[#1A1918] leading-relaxed whitespace-pre-wrap">
+                          {turn.message}
+                        </div>
+
+                        {turn.revealedRequirement && (
+                          <div className="text-[11px] font-mono text-[#1F7A55] bg-[#EDF3EC] border border-[#CBE4D6] px-2.5 py-1 rounded">
+                            Revealed Requirement: {turn.revealedRequirement}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                <>
+                  {/* Overall Score & Tri-factor Rubrics */}
+                  <div className="rounded-xl border border-[#E5E2DA] bg-[#FFFFFF] p-5 space-y-4">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold font-mono text-[#6E6B65] uppercase">
+                        Evaluation Performance Summary
+                      </span>
+                      <span className="text-sm font-mono font-bold text-[#1F7A55] rounded border border-[#CBE4D6] bg-[#EDF3EC] px-3 py-1">
+                        Score: {selectedTranscriptSession.overallScore ?? "—"}/10
+                      </span>
+                    </div>
+
+                    {selectedTranscriptSession.categoryScores && (
+                      <div className="grid grid-cols-3 gap-2 text-center text-xs font-mono">
+                        <div className="rounded border border-[#E5E2DA] bg-[#FAF8F5] p-2.5">
+                          <div className="text-[10px] text-[#8E8B84]">RELEVANCE</div>
+                          <div className="text-sm font-bold text-[#1A1918] mt-0.5">
+                            {selectedTranscriptSession.categoryScores.relevance}/10
+                          </div>
+                        </div>
+                        <div className="rounded border border-[#E5E2DA] bg-[#FAF8F5] p-2.5">
+                          <div className="text-[10px] text-[#8E8B84]">DEPTH</div>
+                          <div className="text-sm font-bold text-[#1A1918] mt-0.5">
+                            {selectedTranscriptSession.categoryScores.depth}/10
+                          </div>
+                        </div>
+                        <div className="rounded border border-[#E5E2DA] bg-[#FAF8F5] p-2.5">
+                          <div className="text-[10px] text-[#8E8B84]">CLARITY</div>
+                          <div className="text-sm font-bold text-[#1A1918] mt-0.5">
+                            {selectedTranscriptSession.categoryScores.clarity}/10
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {selectedTranscriptSession.summaryFeedback && (
+                      <div className="text-xs text-[#423F3A] bg-[#FAF8F5] border border-[#E5E2DA] p-3 rounded-lg leading-relaxed">
                         <span className="font-semibold text-[#1A1918]">
-                          Feedback:{" "}
+                          AI Synthesis:{" "}
                         </span>
-                        {resp.feedback}
+                        {selectedTranscriptSession.summaryFeedback}
                       </div>
+                    )}
+                  </div>
+
+                  {/* Step-by-Step Questions & Responses */}
+                  <div className="space-y-4">
+                    <div className="text-xs font-mono uppercase text-[#6E6B65]">
+                      Detailed Q&amp;A Log (
+                      {selectedTranscriptSession.responses?.length || 0} responses)
                     </div>
-                  )
-                )}
-              </div>
+
+                    {selectedTranscriptSession.responses?.map(
+                      (resp: MockSessionResponse, idx: number) => (
+                        <div
+                          key={idx}
+                          className="rounded-xl border border-[#E5E2DA] bg-[#FFFFFF] p-5 space-y-3.5 shadow-xs"
+                        >
+                          <div className="flex items-center justify-between border-b border-[#E5E2DA] pb-2 text-xs">
+                            <span className="font-mono font-bold text-[#1A1918]">
+                              Question {idx + 1} ({resp.stage})
+                            </span>
+                            <span className="font-mono font-bold text-[#1F7A55]">
+                              {resp.scores.overall}/10
+                            </span>
+                          </div>
+
+                          <div className="text-xs font-semibold text-[#1A1918] leading-relaxed">
+                            {resp.questionPrompt}
+                          </div>
+
+                          {resp.codeSubmitted && (
+                            <div className="space-y-1">
+                              <div className="text-[10px] font-mono text-[#8E8B84]">
+                                Candidate Code ({resp.language || "Code"}):
+                              </div>
+                              <pre className="rounded bg-[#1A1918] text-[#FAF8F5] p-3 text-[11px] font-mono overflow-x-auto leading-relaxed">
+                                {resp.codeSubmitted}
+                              </pre>
+                            </div>
+                          )}
+
+                          {resp.userAnswer && (
+                            <div className="space-y-1">
+                              <div className="text-[10px] font-mono text-[#8E8B84]">
+                                Candidate Written Rationale:
+                              </div>
+                              <div className="bg-[#FAF8F5] border border-[#E5E2DA] rounded p-3 text-xs text-[#33312E] font-mono leading-relaxed whitespace-pre-wrap">
+                                {resp.userAnswer}
+                              </div>
+                            </div>
+                          )}
+
+                          <div className="grid grid-cols-3 gap-2 text-center text-[11px] font-mono pt-1">
+                            <div className="border border-[#E5E2DA] bg-[#FAF8F5] rounded p-1.5">
+                              <span className="text-[#8E8B84] text-[10px]">Rel:</span>{" "}
+                              <span className="font-bold text-[#1A1918]">
+                                {resp.scores.relevance}/10
+                              </span>
+                            </div>
+                            <div className="border border-[#E5E2DA] bg-[#FAF8F5] rounded p-1.5">
+                              <span className="text-[#8E8B84] text-[10px]">Depth:</span>{" "}
+                              <span className="font-bold text-[#1A1918]">
+                                {resp.scores.depth}/10
+                              </span>
+                            </div>
+                            <div className="border border-[#E5E2DA] bg-[#FAF8F5] rounded p-1.5">
+                              <span className="text-[#8E8B84] text-[10px]">Clarity:</span>{" "}
+                              <span className="font-bold text-[#1A1918]">
+                                {resp.scores.clarity}/10
+                              </span>
+                            </div>
+                          </div>
+
+                          <div className="text-[11px] text-[#55524C] pt-2 border-t border-[#E5E2DA] leading-relaxed">
+                            <span className="font-semibold text-[#1A1918]">
+                              Feedback:{" "}
+                            </span>
+                            {resp.feedback}
+                          </div>
+                        </div>
+                      )
+                    )}
+                  </div>
+                </>
+              )}
             </motion.div>
           </div>
         )}
