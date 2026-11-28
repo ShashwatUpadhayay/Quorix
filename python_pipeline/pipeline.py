@@ -13,6 +13,7 @@ from .gemini import GeminiClient, GeminiError
 STAGES = ("icebreaker", "technical", "techno_managerial")
 
 DOMAINS = {
+    "System Design": ("system design", "architecture", "architect", "scalability"),
     "Backend & APIs": ("backend", "api", "node", "fastapi", "express", "rest", "grpc"),
     "Databases & Storage": ("postgres", "sql", "mongodb", "redis", "database", "prisma"),
     "Distributed Systems": ("kafka", "distributed", "raft", "microservice", "consensus"),
@@ -69,6 +70,12 @@ class GeneratedQuestion:
 
 
 CURATED = [
+    GeneratedQuestion("Design a URL-shortening service for 100 million new links per month. Clarify requirements, define the API and data model, estimate read/write capacity, and explain how redirects remain available during regional failures.", "System Design", "URL Shortening", 2, "icebreaker", ["Functional requirements and redirect semantics", "API contract and link data model", "Read/write capacity estimate and storage choice", "Availability and collision handling"], ["URL shortening", "API design", "capacity planning", "availability"]),
+    GeneratedQuestion("Design a personalized home feed for a social platform with 50 million daily active users. Compare fan-out-on-write and fan-out-on-read, then describe ranking, caching, freshness, and celebrity-account handling.", "System Design", "Social Feed", 3, "technical", ["Feed requirements and freshness targets", "Fan-out strategy and ranking flow", "Storage and cache design", "Hot-key mitigation and delivery trade-offs"], ["feeds", "fan-out", "caching", "scale"]),
+    GeneratedQuestion("Design a multi-region notification service that delivers email, push, and SMS reliably. Explain API ingestion, prioritization, retries, deduplication, provider outages, and delivery observability.", "System Design", "Notification Platform", 4, "technical", ["Ingestion API and notification model", "Queue partitioning and delivery workers", "Retries, idempotency, and provider failover", "Delivery SLOs and operational visibility"], ["messaging", "queues", "idempotency", "reliability"]),
+    GeneratedQuestion("Design a collaborative document editor for teams. Explain the storage model and conflict-resolution approach, then address offline edits, synchronization, permissions, and recovery after a regional outage.", "System Design", "Collaborative Editor", 4, "technical", ["Collaboration and consistency requirements", "Document and revision data model", "Conflict resolution and sync protocol", "Offline recovery, authorization, and regional resilience"], ["collaboration", "consistency", "synchronization", "recovery"]),
+    GeneratedQuestion("Design a global rate-limiting service for public APIs. Compare token-bucket and sliding-window approaches, choose where counters live, and explain tenant isolation, clock skew, and behavior during datastore failure.", "System Design", "Rate Limiter", 5, "techno_managerial", ["Limit semantics and API integration", "Algorithm and distributed counter design", "Tenant fairness and regional consistency", "Failure-mode behavior and operational trade-offs"], ["rate limiting", "distributed counters", "multi-tenancy", "trade-offs"]),
+    GeneratedQuestion("Design an event-ingestion platform that accepts 2 million events per second and supports replayable analytics. Cover partitioning, schema evolution, retention, consumer lag, and protection from overloaded downstream systems.", "System Design", "Event Ingestion", 5, "techno_managerial", ["Throughput and durability requirements", "Partitioning and schema-evolution strategy", "Retention, replay, and consumer isolation", "Backpressure, lag monitoring, and recovery"], ["event streaming", "throughput", "backpressure", "data contracts"]),
     GeneratedQuestion("Walk me through a backend service you built end to end. What did you personally own, and which production constraint shaped the design?", "Backend & APIs", "API Design & Versioning", 2, "icebreaker", ["Ownership", "Production constraint", "Trade-off", "Outcome"], ["backend", "ownership"]),
     GeneratedQuestion("A REST endpoint sometimes returns stale data immediately after an update. How would you diagnose caching, replication and read-after-write behavior?", "Backend & APIs", "REST & HTTP", 3, "technical", ["Caching headers", "Replica lag", "Read-after-write", "Observability"], ["REST", "caching", "replication"]),
     GeneratedQuestion("Your public API has a breaking change that mobile clients cannot all upgrade immediately. How would you version and roll out the change safely?", "Backend & APIs", "API Design & Versioning", 4, "technical", ["Versioning strategy", "Parallel compatibility", "Rollout", "Rollback"], ["API", "compatibility", "versioning"]),
@@ -90,6 +97,8 @@ CURATED = [
 def resolve_domain(request: QuestionRequest) -> str:
     if request.interview_type.lower() == "coding":
         return "Algorithms & Data Structures"
+    if request.interview_type.lower() == "system_design":
+        return "System Design"
     if request.domain:
         return request.domain
     text = " ".join(
@@ -285,16 +294,25 @@ class QuestionPipeline:
         style = [q.text for q in CURATED if q.topic == domain][:5]
         asked = "\n".join(f"- {text}" for text in request.asked_question_texts[-10:])
         coding = request.interview_type.lower() == "coding"
+        system_design = request.interview_type.lower() == "system_design"
         system = (
             "You are a senior coding interviewer. Return only a single valid JSON object."
             if coding
-            else "You are a senior technical interviewer. Return only a single valid JSON "
-                 "object."
+            else "You are a senior system design interviewer. Return only a single valid JSON object."
+            if system_design
+            else "You are a senior technical interviewer. Return only a single valid JSON object."
         )
-        system += (
-            " For coding questions, provide a clear DSA problem, starter function code,"
-            " constraints, and sample test cases. Do not repeat or paraphrase prior questions."
-        )
+        if coding:
+            system += (
+                " Provide a clear DSA problem, starter function code, constraints, and sample test cases."
+            )
+        elif system_design:
+            system += (
+                " Create realistic architecture interview prompts with explicit scale or reliability constraints."
+                " Require candidates to clarify requirements, define interfaces and data, explain component and data flows,"
+                " quantify scaling decisions, and discuss failure handling and trade-offs."
+            )
+        system += " Do not repeat or paraphrase prior questions."
         coding_contract = (
             '\nReturn exactly this JSON object:\n'
             '{"text":"...","topic":"Algorithms & Data Structures","subtopic":"...","difficulty":'
@@ -302,6 +320,10 @@ class QuestionPipeline:
             '"codeStarter":"function solution(input) {\\n  // Write your solution here\\n}\\n",'
             '"constraints":["..."],"examples":[{"input":"...","output":"...","explanation":"..."}]}'
             if coding
+            else '\nReturn exactly this JSON object:\n'
+                 '{"text":"A concrete system design scenario with scale and reliability constraints","topic":"System Design","subtopic":"...","difficulty":%d,"stage":"%s","expectedPoints":["requirements and SLOs","architecture and data flow","API and data model","capacity and scaling","failure modes and trade-offs"],"competencyTags":["..."]}'
+                 % (difficulty, stage)
+            if system_design
             else '\nReturn exactly this JSON object:\n'
                  '{"text":"...","topic":"%s","subtopic":"...","difficulty":%d,"stage":"%s",'
                  '"expectedPoints":["..."],"competencyTags":["..."]}' % (domain, difficulty, stage)
@@ -327,6 +349,8 @@ Already asked:
 Local style examples:
 {chr(10).join(f"- {text}" for text in style) or "- none"}
 
+{"For a system design question, require a structured architecture walkthrough covering requirements/SLOs, core components and data flow, API/data model, capacity and scaling, reliability/failure modes, and explicit trade-offs. Keep it as one interview prompt rather than answering it." if system_design else ""}
+
 {coding_contract}"""
         result = self.ollama.generate_json(
             system=system,
@@ -342,13 +366,22 @@ Local style examples:
         stage_value = str(data["stage"])
         if stage_value not in STAGES:
             raise ValueError("Generated question has an invalid stage")
+        expected_points = [
+            str(x)
+            for x in data.get("expectedPoints", [])
+            if str(x).strip()
+        ]
+        if system_design and len(expected_points) < 5:
+            raise ValueError(
+                "System design question is missing architecture evaluation criteria"
+            )
         return GeneratedQuestion(
             text=text,
             topic=domain,
             subtopic=subtopic,
             difficulty=difficulty,
             stage=stage_value,
-            expected_points=[str(x) for x in data["expectedPoints"]],
+            expected_points=expected_points,
             competency_tags=[str(x) for x in data["competencyTags"]],
             codeStarter=str(data.get("codeStarter") or "") if coding else None,
             constraints=[str(x) for x in data.get("constraints", [])] if coding else [],
@@ -397,6 +430,14 @@ Local style examples:
                     "output": "expected output",
                     "explanation": "Derive the result using the stated constraints.",
                 }
+            ]
+        elif request and request.interview_type.lower() == "system_design":
+            question.expected_points = question.expected_points or [
+                "Clarify functional and non-functional requirements and SLOs",
+                "Explain core components, APIs, data model, and request/data flow",
+                "Estimate capacity and justify scaling and storage choices",
+                "Address consistency, reliability, and important failure modes",
+                "Compare alternatives and make explicit trade-offs",
             ]
         return {
             "question": asdict(question)

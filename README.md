@@ -4,9 +4,13 @@ This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-
 
 Mock interviews now select or generate questions dynamically at session start and
 after every answer, calibrated by the candidate profile, stage and difficulty.
-The pipeline supports Ollama (local dev) and Gemini (prod), stores a reviewed
+The pipeline uses Ollama for local generation and Groq for production, stores a reviewed
 question bank in MongoDB, validates every generated question, and falls back to
-approved bank questions on failure.
+approved bank questions on failure. System Design interviews are available in
+the candidate workspace and use dedicated prompts for requirements and SLOs,
+architecture/data flow, APIs and data models, capacity planning, reliability,
+and trade-offs. Local Ollama, production Groq, and curated fallback questions
+use the same system-design evaluation rubric.
 
 - Architecture and setup: [`docs/QUESTION_PIPELINE.md`](docs/QUESTION_PIPELINE.md)
 - Review UI: `/admin/questions` (admin or expert role)
@@ -22,6 +26,7 @@ generation.
 ollama pull qwen2.5:7b
 npm run pipeline:python:doctor
 npm run pipeline:python -- --mode=generate --focus="Kafka" --level=Senior --tags="Kafka,Go"
+python -m python_pipeline.cli generate --interview-type system_design --focus="URL shortening" --level=Senior
 python -m unittest tests/test_python_question_pipeline.py
 ```
 

@@ -45,6 +45,30 @@ function toText(value: unknown): string {
   }
 }
 
+const SYSTEM_DESIGN_EXPECTED_POINTS = [
+  "Clarify functional and non-functional requirements and measurable SLOs",
+  "Define core components and end-to-end request/data flow",
+  "Specify API contracts and the data model",
+  "Estimate capacity and justify scaling and storage choices",
+  "Address reliability, consistency, and failure modes",
+  "Compare alternatives and explain trade-offs",
+];
+
+function assertSystemDesignRubric(
+  questions: Array<{ expectedPoints?: string[] }>
+): void {
+  for (const question of questions) {
+    if (
+      !Array.isArray(question.expectedPoints) ||
+      question.expectedPoints.filter((point) => toText(point)).length < 5
+    ) {
+      throw new Error(
+        "System design questions must include at least five architecture evaluation criteria"
+      );
+    }
+  }
+}
+
 function parseJsonObject<T>(raw: string): T {
   let text = raw.trim();
   if (text.startsWith("```")) {
@@ -213,11 +237,11 @@ export function generateFallbackSessionQuestions(params: {
       `Optimize a large-scale ${params.focus} algorithm for latency and memory.`,
     ],
     system_design: [
-      `Design a reliable system around ${params.focus} from requirements to deployment.`,
-      `Scale ${params.focus} across regions while protecting consistency and availability.`,
-      `Plan an incident-safe rollout of ${params.focus} in a distributed environment.`,
-      `Estimate capacity and define SLOs for a production ${params.focus} platform.`,
-      `Lead the architectural evolution of ${params.focus} across multiple teams.`,
+      `Design a ${params.focus} service for 10 million daily users. Clarify functional requirements and SLOs, define APIs and data models, estimate capacity, and explain the architecture, scaling strategy, and failure handling.`,
+      `Design a multi-region ${params.focus} platform. Describe request and data flows, consistency choices, regional failover, recovery objectives, and the trade-offs of your design.`,
+      `Design ${params.focus} to handle a tenfold traffic spike without losing data. Explain capacity estimates, bottleneck mitigation, backpressure, degradation behavior, and monitoring.`,
+      `Design a reliable ${params.focus} system with strict availability and latency targets. Compare storage and communication choices, then address replication, retries, idempotency, and failure recovery.`,
+      `Evolve ${params.focus} for multiple tenants and regions. Define isolation and API boundaries, data partitioning, security controls, operational SLOs, and a safe migration plan.`,
     ],
     behavioral: [
       `Describe a difficult ${params.focus} decision you owned and explain your trade-offs.`,
@@ -269,12 +293,15 @@ export function generateFallbackSessionQuestions(params: {
             ],
           }
         : {}),
-      expectedPoints: [
-        "Concrete reasoning",
-        "Trade-offs",
-        "Failure handling",
-        "Measurable outcome",
-      ],
+      expectedPoints:
+        params.interviewType === "system_design"
+          ? SYSTEM_DESIGN_EXPECTED_POINTS
+          : [
+              "Concrete reasoning",
+              "Trade-offs",
+              "Failure handling",
+              "Measurable outcome",
+            ],
       competencyTags: [params.focus, params.level, params.interviewType],
       expectedSignals: ["clarity", "depth", "production reasoning"],
       source: "fallback",
@@ -318,6 +345,7 @@ async function generateWithGemini(params: {
     Staff: [4, 5],
   };
   const [low, high] = ranges[params.level];
+  const systemDesign = params.interviewType === "system_design";
   const sessionSeed = `${params.sessionId}-${Date.now()}-${Math.random()
     .toString(36)
     .slice(2)}`;
@@ -367,6 +395,12 @@ ${
 - Each codeStarter must be a valid function scaffold for JavaScript/TypeScript with no solution implementation.
 - Keep constraints and sample test cases internally consistent.
 - Do not produce system design, conceptual, or behavioral questions.`
+    : systemDesign
+      ? `- Generate system architecture design prompts, not conceptual trivia or coding exercises.
+- Each prompt must describe a concrete product/system scenario and include realistic scale, latency, availability, consistency, or durability constraints.
+- Ask the candidate to clarify functional/non-functional requirements, define APIs and data models, explain components and end-to-end flows, estimate capacity and scaling, address reliability/failure modes, and justify trade-offs.
+- expectedPoints must include at least five distinct architecture evaluation criteria covering those areas.
+- Ensure the planned stage adds appropriate scope: introductory requirements at icebreaker, detailed technical architecture in technical, and cross-region/organizational trade-offs at techno_managerial.`
     : `- Use 1-3 self-contained sentences grounded in a realistic engineering scenario.`
 }
 - Return a JSON object containing only one "questions" array.`;
@@ -444,14 +478,17 @@ ${
           text:
             params.interviewType === "coding"
               ? "You are a senior coding interviewer specializing in DSA. Return only valid JSON. Generate self-contained algorithm problems with starter code, constraints, and sample cases."
-              : "You are a senior technical interviewer. Return only valid JSON.",
+              : systemDesign
+                ? "You are a senior system design interviewer. Return only valid JSON containing concrete, constraint-driven architecture interview prompts and evaluation criteria."
+                : "You are a senior technical interviewer. Return only valid JSON.",
         },
       ],
     },
     contents: [{ role: "user", parts: [{ text: prompt }] }],
     generationConfig: {
-      temperature: params.interviewType === "coding" ? 0.65 : 0.8,
-      maxOutputTokens: params.interviewType === "coding" ? 3000 : 1800,
+      temperature: params.interviewType === "coding" ? 0.65 : systemDesign ? 0.7 : 0.8,
+      maxOutputTokens:
+        params.interviewType === "coding" || systemDesign ? 3000 : 1800,
       responseMimeType: "application/json",
       responseSchema: questionSchema,
     },
@@ -531,6 +568,7 @@ ${
         );
       }
     }
+    if (systemDesign) assertSystemDesignRubric(parsed.questions);
   }
 
   return parsed.questions.map((question, index) => {
@@ -653,6 +691,7 @@ async function generateWithGroq(params: {
     Staff: [4, 5],
   };
   const [low, high] = ranges[params.level];
+  const systemDesign = params.interviewType === "system_design";
   const sessionSeed = `${params.sessionId}-${Date.now()}-${Math.random()
     .toString(36)
     .slice(2)}`;
@@ -704,6 +743,12 @@ ${
 - Each codeStarter must be a valid function scaffold for JavaScript/TypeScript with no solution implementation.
 - Keep constraints and sample test cases internally consistent.
 - Do not produce system design, conceptual, or behavioral questions.`
+    : systemDesign
+      ? `- Generate system architecture design prompts, not conceptual trivia or coding exercises.
+- Each prompt must describe a concrete product/system scenario and include realistic scale, latency, availability, consistency, or durability constraints.
+- Ask the candidate to clarify functional/non-functional requirements, define APIs and data models, explain components and end-to-end flows, estimate capacity and scaling, address reliability/failure modes, and justify trade-offs.
+- expectedPoints must include at least five distinct architecture evaluation criteria covering those areas.
+- Ensure the planned stage adds appropriate scope: introductory requirements at icebreaker, detailed technical architecture in technical, and cross-region/organizational trade-offs at techno_managerial.`
     : `- Use 1-3 self-contained sentences grounded in a realistic engineering scenario.`
 }
 - Return a JSON object containing only one "questions" array.
@@ -721,12 +766,14 @@ ${
         role: "system",
         content: coding
           ? "You are a senior coding interviewer specializing in DSA. Return only valid JSON. Generate self-contained algorithm problems with starter code, constraints, and sample cases."
-          : "You are a senior technical interviewer. Return only valid JSON.",
+          : systemDesign
+            ? "You are a senior system design interviewer. Return only valid JSON containing concrete, constraint-driven architecture interview prompts and evaluation criteria."
+            : "You are a senior technical interviewer. Return only valid JSON.",
       },
       { role: "user", content: prompt },
     ],
-    temperature: coding ? 0.65 : 0.8,
-    max_completion_tokens: coding ? 3000 : 1800,
+    temperature: coding ? 0.65 : systemDesign ? 0.7 : 0.8,
+    max_completion_tokens: coding || systemDesign ? 3000 : 1800,
     response_format: { type: "json_object" },
   });
 
@@ -788,6 +835,7 @@ ${
       `Groq returned ${parsed.questions?.length || 0} questions; expected ${params.count}`
     );
   }
+  if (systemDesign) assertSystemDesignRubric(parsed.questions);
 
   return parsed.questions.map((question, index) => {
     const spec = questionSpecs[index];
