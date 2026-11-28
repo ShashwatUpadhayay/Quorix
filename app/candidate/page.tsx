@@ -147,8 +147,8 @@ const INTERVIEW_TYPES: Array<{
   {
     id: "system_design",
     title: "System Design",
-    desc: "Distributed scalability, storage, caching & high availability",
-    available: false,
+    desc: "Architecture, APIs, data models, scale & reliability",
+    available: true,
   },
   {
     id: "behavioral",

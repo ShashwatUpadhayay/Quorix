@@ -78,7 +78,7 @@ def main() -> None:
                 session_id=session_id,
                 question_number=question_number,
                 planned_question_count=count,
-                interview_type=payload.get("interpriseType", payload.get("interviewType", "technical")),
+                interview_type=payload.get("interviewType", "technical"),
                 focus=payload.get("focus", ""),
                 mode="generate",
                 profile=profile,

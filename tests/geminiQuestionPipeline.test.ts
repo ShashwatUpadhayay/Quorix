@@ -87,3 +87,77 @@ test("Groq coding sessions use the OpenAI-compatible response shape", async () =
     else process.env.GROQ_MODEL = previousModel;
   }
 });
+
+test("Groq system design sessions require architecture-specific evaluation points", async () => {
+  const env = process.env as Record<string, string | undefined>;
+  const previousNodeEnv = env.NODE_ENV;
+  const previousKey = process.env.GROQ_API_KEY;
+  const previousModel = process.env.GROQ_MODEL;
+  const previousFetch = globalThis.fetch;
+  env.NODE_ENV = "production";
+  process.env.GROQ_API_KEY = "test-key";
+  process.env.GROQ_MODEL = "openai/gpt-oss-120b";
+
+  globalThis.fetch = (async (_url, init) => {
+    const body = JSON.parse(String(init?.body));
+    const prompt = body.messages[1].content as string;
+    assert.match(prompt, /system architecture design prompts/i);
+    assert.match(prompt, /capacity and scaling/i);
+
+    return new Response(
+      JSON.stringify({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({
+                questions: [
+                  {
+                    text: "Design a global event ingestion platform for one million events per second. Define its APIs, data model, partitioning, backpressure, regional failure recovery, and SLOs.",
+                    topic: "System Design",
+                    subtopic: "Event Ingestion",
+                    difficulty: 3,
+                    stage: "icebreaker",
+                    expectedPoints: [
+                      "Clarify functional requirements and SLOs",
+                      "Define components and end-to-end data flow",
+                      "Specify APIs and data model",
+                      "Estimate throughput and scaling strategy",
+                      "Handle reliability, backpressure, and failure modes",
+                      "Explain architectural trade-offs",
+                    ],
+                    competencyTags: ["distributed systems", "event streaming"],
+                  },
+                ],
+              }),
+            },
+          },
+        ],
+      }),
+      { status: 200, headers: { "Content-Type": "application/json" } }
+    );
+  }) as typeof fetch;
+
+  try {
+    const result = await generateSessionQuestions({
+      sessionId: "groq-system-design-test",
+      interviewType: "system_design",
+      level: "Senior",
+      focus: "Event ingestion",
+      count: 1,
+    });
+
+    assert.equal(result.provider, "groq");
+    assert.equal(result.questions.length, 1);
+    assert.equal(result.questions[0].topic, "System Design");
+    assert.equal(result.questions[0].expectedPoints?.length, 6);
+    assert.equal(result.questions[0].codeStarter, undefined);
+  } finally {
+    globalThis.fetch = previousFetch;
+    if (previousNodeEnv === undefined) delete env.NODE_ENV;
+    else env.NODE_ENV = previousNodeEnv;
+    if (previousKey === undefined) delete process.env.GROQ_API_KEY;
+    else process.env.GROQ_API_KEY = previousKey;
+    if (previousModel === undefined) delete process.env.GROQ_MODEL;
+    else process.env.GROQ_MODEL = previousModel;
+  }
+});
